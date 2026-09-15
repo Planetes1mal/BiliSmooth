@@ -1,4 +1,4 @@
-# BiliSmooth 2.8.2 架构
+# BiliSmooth 架构
 
 ## 执行边界
 
@@ -64,7 +64,7 @@ BiliSmoothRoutingPolicy.addressForHost(rawUrl, host); // 改写后的地址字�
 
 MAIN 世界同步读取启动缓存，然后接收异步权威配置。用户明确固定选择优先于自动排名；已经交付的播放信息需要新设置时，界面提示刷新。保存有唯一 ID、5 秒超时、pending/saved/error 状态；数组按内容比较确认。控制桥的刷新命令等待保存成功后才刷新页面。
 
-自动候选池现有 9 个 host，在原有顺序末尾增加 `upos-sz-mirrorhwb.bilivideo.com`；固定列表由该池加 2 个 Akamai host 生成。默认首选不变，媒体表示的备用地址仍最多 8 条。新节点提供额外可测候选，最终选线由当前网络证据决定。
+自动候选池由 `settings.js` 维护；固定列表由该池加 Akamai host 生成。媒体表示的备用地址最多 8 条，最终选线由当前网络证据决定。
 
 六小时排名缓存使用 `bilismooth.routing.rank.v3.` 前缀，按时区及语言区分。前缀升级使旧候选池的排名不会阻止新池首次探测；用户设置继续使用 v4，播放反馈缓存保持 `biliSmooth.playback-feedback.v1.`。
 
@@ -84,7 +84,7 @@ shared.viewport(window) 返回 {left,top,right,bottom,width,height,originX,origi
 
 ## 动效与热区
 
-2.8.0 的入口色面与文字使用成对 `entry-*` token。新配置默认青碧；已有强调色偏好保留，schemaVersion 与存储键不变。深色用墨灰背景及深色调色面。状态 logo 以可见位移和不同几何节奏表达状态，减少动效/隐藏时停止循环。
+入口色面与文字使用成对 `entry-*` token。新配置默认青碧；已有强调色偏好保留，schemaVersion 与存储键不变。深色用墨灰背景及深色调色面。状态 logo 以可见位移和不同几何节奏表达状态，减少动效/隐藏时停止循环。
 
 Motion mini 与 spring 由构建打包为本地 BiliSmoothMotion。背景几何与内容分开变换，展开约 400ms、收起约 240ms。快速反向先读取可见背景矩形，再取消旧动画，避免对 hidden 节点提交样式。选择菜单保留可中断过渡，实例及全局 `syncMotion()` 由控制页和浮窗偏好同步调用，结束当前过渡并完成相应 popover 终态。开关使用原生 CSS。入口悬停装饰在独立视觉层上执行，不修改定位锚点，拖拽接管时清除。
 

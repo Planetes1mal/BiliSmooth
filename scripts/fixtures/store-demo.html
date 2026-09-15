@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta property="og:image" content="https://i0.hdslb.com/bfs/bilismooth-demo/test-video.png">
+  <title>Test video</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: light; background: #f5f7f6; }
+    body { margin: 0; color: #1f2925; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 25px 40px; border-bottom: 1px solid #dfe6e1; }
+    .brand { display: flex; align-items: center; gap: 11px; font-size: 18px; font-weight: 650; letter-spacing: -.4px; }
+    .brand svg { width: 31px; height: 31px; }
+    .label { color: #5b6861; font-size: 12px; font-weight: 550; }
+    main { max-width: 1140px; margin: 26px auto; padding: 0 30px; }
+    .video-shell { position: relative; overflow: hidden; border-radius: 16px; background: #d8eae3; box-shadow: 0 1px 0 #d9e1dc; }
+    video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+    .demo-label { position: absolute; right: 16px; top: 16px; border-radius: 6px; padding: 6px 10px; background: #f5f7f6e8; color: #40564a; font-size: 11px; font-weight: 600; }
+    .caption { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 0; }
+    h1 { margin: 0; font-size: 23px; font-weight: 650; letter-spacing: -.5px; }
+    .caption p { margin: 7px 0 0; color: #5b6861; font-size: 12px; }
+    button { display: inline-flex; align-items: center; justify-content: center; min-width: 88px; height: 36px; border: 1px solid #d9e1dc; border-radius: 8px; background: #fff; color: #244d44; font: inherit; font-size: 12px; cursor: pointer; }
+    button:hover { background: #e7efea; }
+    @media (max-width: 1000px) {
+      header { padding: 17px 30px; }
+      main { margin: 20px auto; }
+      .caption { padding-top: 15px; }
+      h1 { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 54 54" aria-hidden="true"><rect width="54" height="54" rx="19" fill="#d8eae3"/><g transform="translate(13 13) scale(.7777778)" fill="#1f2925"><path d="M11 4H31V11H14L7 18H0V15L11 4Z"/><path d="M11 14H24L31 21H18L11 14Z"/><path d="M5 25H22L29 18H36V21L25 32H5V25Z"/></g></svg>
+      BiliSmooth
+    </div>
+    <span class="label">Interface demo</span>
+  </header>
+  <main>
+    <div class="video-shell">
+      <video muted playsinline autoplay poster="https://i0.hdslb.com/bfs/bilismooth-demo/test-video.png" aria-label="Test video"></video>
+      <span class="demo-label">Demo video</span>
+    </div>
+    <div class="caption">
+      <div><h1>Test video</h1><p>Original demo artwork · Local playback</p></div>
+      <button id="playback" type="button">Pause</button>
+    </div>
+  </main>
+  <script>
+    (async () => {
+      const artwork = new Image();
+      artwork.crossOrigin = 'anonymous';
+      artwork.src = 'https://i0.hdslb.com/bfs/bilismooth-demo/test-video.png';
+      await artwork.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280;
+      canvas.height = 720;
+      const graphics = canvas.getContext('2d');
+      const scale = Math.max(canvas.width / artwork.width, canvas.height / artwork.height);
+      const width = artwork.width * scale, height = artwork.height * scale;
+      const draw = () => graphics.drawImage(artwork, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+      draw();
+      const video = document.querySelector('video');
+      video.srcObject = canvas.captureStream(30);
+      setInterval(draw, 1000 / 30);
+      await video.play();
+      const toggle = document.querySelector('#playback');
+      toggle.addEventListener('click', async () => {
+        if (video.paused) await video.play(); else video.pause();
+        toggle.textContent = video.paused ? 'Play' : 'Pause';
+      });
+    })().catch(error => { document.querySelector('.caption p').textContent = 'Demo video could not start.'; console.error(error); });
+  </script>
+</body>
+</html>

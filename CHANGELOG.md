@@ -1,15 +1,33 @@
-# 更新记录
+# 更新记录 / Changelog
 
-[简体中文说明](./README.md) · [English overview](./README.en.md) · [GitHub Releases](https://github.com/Planetes1mal/BiliSmooth/releases)
+## 2.8.3 — 2026-09-15
+
+### 中文
+
+- 浏览器中的扩展名称、简介和工具栏提示支持英文显示。
+- 提供完整的英文隐私说明。
+- 网站访问权限收窄为 bilibili.com。
+
+### English
+
+- Added English text for the extension name, description and toolbar tooltip in the browser.
+- Added a complete privacy policy in English.
+- Limited website access to bilibili.com.
 
 ## 2.8.2 — 2026-09-15
 
-**首个公开版本。**
+### 中文
 
-- Chrome / Edge 120+ 的 Manifest V3 扩展，通过 ZIP 解压加载。
-- 视频页浮窗：真实下载速度、按倍速换算的可播余量、播放状态和线路信息；支持拖动、贴边与展开控制。
-- 自动或固定 CDN 选线、按播放反馈尝试卡顿恢复，保留播放器选择的画质；自动候选包含 `upos-sz-mirrorhwb.bilivideo.com`。
-- 独立仪表盘：播放概览、线路管理、外观设置、运行记录与诊断导出。
-- 中文和英文界面、主题与强调色、本地偏好保存。
+首次发布。
 
-功能与安装说明见 [版本说明](./docs/releases/2.8.2.md)，来源归属见 [第三方声明](./NOTICE.md)。
+- 视频页浮窗显示下载速度、可播余量和当前线路，支持拖动、贴边与展开控制。
+- 支持自动或手动选择 CDN，播放卡顿时可尝试备用线路。
+- 仪表盘提供下载曲线、线路信息和设置，支持中英文、浅色与深色主题。
+
+### English
+
+Initial release.
+
+- Floating video controls show download speed, playable buffer and the active route, with drag, dock and expand controls.
+- Automatic and manual CDN selection, with alternate routes available when playback stalls.
+- A dashboard for download history, route information and settings, with Chinese and English text and light and dark themes.

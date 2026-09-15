@@ -5,7 +5,7 @@ const controlUrl = chrome.runtime.getURL('control/index.html');
 const currentVersion = chrome.runtime.getManifest().version;
 let settingsQueue = Promise.resolve(), opening = Promise.resolve();
 function isVideoSite(url) {
-  try { const value = new URL(url); return value.protocol === 'https:' && /(^|\.)bilibili\.(com|tv)$/.test(value.hostname); }
+  try { const value = new URL(url); return value.protocol === 'https:' && /(^|\.)bilibili\.com$/.test(value.hostname); }
   catch { return false; }
 }
 function serializeSettings(action, patch) {

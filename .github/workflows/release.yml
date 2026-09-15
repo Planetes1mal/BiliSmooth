@@ -56,11 +56,11 @@ jobs:
             gh release create "$RELEASE_TAG" \
               --repo "$GH_REPO" --draft --verify-tag \
               --title "BiliSmooth $RELEASE_VERSION" \
-              --notes-file "docs/releases/$RELEASE_VERSION.md"
+              --notes-file "outputs/release-notes-$RELEASE_VERSION.md"
           fi
           gh release upload "$RELEASE_TAG" \
             "outputs/BiliSmooth-$RELEASE_VERSION.zip" \
             outputs/SHA256SUMS.txt --repo "$GH_REPO" --clobber
           node scripts/release.mjs verify --tag "$RELEASE_TAG" --draft
           gh release edit "$RELEASE_TAG" --repo "$GH_REPO" --draft=false --latest \
-            --title "BiliSmooth $RELEASE_VERSION" --notes-file "docs/releases/$RELEASE_VERSION.md"
+            --title "BiliSmooth $RELEASE_VERSION" --notes-file "outputs/release-notes-$RELEASE_VERSION.md"

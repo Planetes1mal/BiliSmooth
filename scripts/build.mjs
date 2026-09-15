@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { buildMotion } from './build-motion.mjs';
+import { extractReleaseNotes } from './changelog.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const inside = relative => {
@@ -33,6 +34,8 @@ async function include(sourceFile, outputFile) {
   const bytes = await readFile(inside(sourceFile)); outputs.set(outputFile, bytes); sourceSha256[sourceFile] = hash(bytes);
 }
 for (const file of ['content.js', 'background.js']) await include('src/extension/' + file, file);
+for (const locale of ['en', 'zh_CN'])
+  await include(`src/extension/_locales/${locale}/messages.json`, `_locales/${locale}/messages.json`);
 const logoBytes = await readFile(inside('src/ui/icon.svg'));
 const inlineLogo = source.match(/const logo = '([^']+)'/)?.[1];
 const logoShape = value => String(value).replace(/<title>[\s\S]*?<\/title>/g, '').replace(/<svg[^>]*>|<\/svg>/g, '').trim();
@@ -70,9 +73,10 @@ const html = outputs.get('control/index.html').toString()
   .replaceAll('../icon.svg', '../' + logoPath)
   .replaceAll('../icons/32.png', '../' + iconPaths[32]);
 outputs.set('control/index.html', Buffer.from(html));
-for (const file of ['LICENSE', 'NOTICE.md', 'README.md', 'README.en.md', 'PRIVACY.md', 'CHANGELOG.md',
-  'docs/licenses/bilibili-accelerator-MIT.txt', 'docs/images/floating-preview.png']) await include(file, file);
-try { await include(`docs/releases/${pkg.version}.md`, 'RELEASE.md'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+for (const file of ['LICENSE', 'NOTICE.md', 'README.md', 'README.en.md', 'PRIVACY.md', 'PRIVACY.en.md', 'CHANGELOG.md',
+  'docs/licenses/bilibili-accelerator-MIT.txt']) await include(file, file);
+const releaseNotes = extractReleaseNotes(outputs.get('CHANGELOG.md').toString(), pkg.version);
+outputs.set('RELEASE.md', Buffer.from(releaseNotes.body));
 outputs.set('BUILD.json', Buffer.from(JSON.stringify({ version: pkg.version, validation: 'candidate',
   bundle: 'playback.js', files, sourceSha256,
   outputSha256: Object.fromEntries([...outputs].map(([file, bytes]) => [file, hash(bytes)])) }, null, 2) + '\n'));
@@ -88,4 +92,6 @@ try {
   await mkdir(path.dirname(backup), { recursive: true }); await rename(out, backup);
 } catch (error) { if (error.code !== 'ENOENT') throw error; }
 await rename(stage, out);
+await mkdir(inside('outputs'), { recursive: true });
+await writeFile(inside(releaseNotes.notesPath), releaseNotes.body);
 console.log(JSON.stringify({ version: pkg.version, output: out, files: outputs.size, previousBuild: backup }));

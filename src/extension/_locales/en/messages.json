@@ -1,0 +1,6 @@
+{
+  "extensionName": { "message": "BiliSmooth - Bilibili Playback Helper" },
+  "extensionDescription": { "message": "Switch Bilibili video CDNs and see download speed, playable buffer time, and playback status in a floating panel." },
+  "actionTitle": { "message": "BiliSmooth - Playback dashboard" },
+  "commandDescription": { "message": "Open the BiliSmooth playback dashboard" }
+}

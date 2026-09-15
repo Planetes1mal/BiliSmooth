@@ -2,7 +2,7 @@
 (function (scope) {
   'use strict';
   if (scope.BiliSmoothSession) return;
-  const VERSION = "2.8.2";
+  const VERSION = "2.8.3";
   const settings = scope.BiliSmoothSettings, document = scope.document;
   const nativeParse = JSON.parse.bind(JSON), clone = value => nativeParse(JSON.stringify(value));
   const sameSetting = (a, b) => a === b || Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((value, index) => value === b[index]);

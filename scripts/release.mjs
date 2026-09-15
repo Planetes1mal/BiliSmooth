@@ -4,11 +4,11 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { extractReleaseNotes } from './changelog.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const REPOSITORY = 'Planetes1mal/BiliSmooth', ORIGIN = `https://github.com/${REPOSITORY}.git`;
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
-const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const fail = message => { throw Error(message); };
 async function run(command, args, cwd = ROOT, capture = false) {
   return new Promise((resolve, reject) => {
@@ -34,16 +34,7 @@ export async function checkRelease({ root = ROOT, tag } = {}) {
   if (tag !== `v${version}`) fail(`Tag ${tag} does not match v${version}.`);
   if ([lock.version, lock.packages?.['']?.version, manifest.version, runtime.match(/const VERSION = ["']([^"']+)["']/)?.[1]].some(value => value !== version))
     fail('package.json, package-lock.json, manifest and playback runtime versions must match.');
-  const headings = [...changelog.matchAll(/^## (.+)\r?$/gm)];
-  const matching = headings.filter(row => new RegExp(`^${escape(version)} — (\\d{4}-\\d{2}-\\d{2})$`).test(row[1].trim()));
-  if (matching.length !== 1) fail(`Expected exactly one dated CHANGELOG heading: ## ${version} — YYYY-MM-DD`);
-  const section = matching[0], date = section[1].trim().slice(-10), end = headings[headings.indexOf(section) + 1]?.index ?? changelog.length;
-  if (!Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) fail('CHANGELOG release date is invalid.');
-  if (!changelog.slice(section.index + section[0].length, end).trim()) fail('CHANGELOG release section must not be empty.');
-  const notesPath = `docs/releases/${version}.md`, notes = await readFile(path.join(root, notesPath), 'utf8');
-  const firstLine = notes.split(/\r?\n/)[0];
-  if (!new RegExp(`^# BiliSmooth ${escape(version)}(?: · .+)?$`).test(firstLine) || !notes.slice(firstLine.length).trim())
-    fail(`Release notes must start with # BiliSmooth ${version} and contain a nonempty body.`);
+  const { date, notesPath } = extractReleaseNotes(changelog, version);
   let previousTag = null, commits = null, hasGit = false;
   try {
     await git(['rev-parse', '--verify', 'HEAD'], root);
@@ -148,7 +139,7 @@ async function publish(spec, options) {
     await npmRun(['run', 'build']); await run(process.execPath, ['scripts/package.mjs'], worktree);
     await run(process.env.PYTHON || 'python', ['scripts/verify-package.py'], worktree);
     await mkdir(path.join(ROOT, 'outputs'), { recursive: true });
-    for (const file of [`BiliSmooth-${spec.version}.zip`, 'SHA256SUMS.txt', `release-${spec.version}-files.json`])
+    for (const file of [`BiliSmooth-${spec.version}.zip`, 'SHA256SUMS.txt', `release-${spec.version}-files.json`, `release-notes-${spec.version}.md`])
       await copyFile(path.join(worktree, 'outputs', file), path.join(ROOT, 'outputs', file));
   } catch (error) { fail(`${error.message}\nCommitted-source build retained at ${worktree}`); }
   // This exact directory was created by this invocation beneath work/.

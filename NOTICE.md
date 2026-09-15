@@ -1,22 +1,28 @@
-# Acknowledgments and third-party components
+# 第三方声明 / Third-party notices
 
 ## Bilibili Accelerator
 
-BiliSmooth 基于 [realzza/bilibili-accelerator](https://github.com/realzza/bilibili-accelerator) 开发。感谢 realzza 对海外 B 站播放卡顿、CDN 选线和浏览器播放观察的工作。
+BiliSmooth 基于 [realzza/bilibili-accelerator](https://github.com/realzza/bilibili-accelerator) 开发，沿用了部分 CDN 选线、媒体地址识别及中转约定。上游采用 MIT License，原始版权与许可全文保留在 [bilibili-accelerator-MIT.txt](docs/licenses/bilibili-accelerator-MIT.txt)。
 
-本项目延续了上游的 CDN 候选与配置约定、PCDN/MCDN 地址识别、`xy_usource` 来源选择及中转 URL 格式，并在此基础上拆分、重构播放模块。上游已提供悬浮面板、下载速度和缓冲显示；BiliSmooth 进一步完善三态浮窗、可配置常驻指标、按当前倍速换算的可播余量和独立仪表盘。
+BiliSmooth is based on [Bilibili Accelerator by realzza](https://github.com/realzza/bilibili-accelerator) and retains parts of its CDN selection, media address recognition, and relay conventions. The upstream project is licensed under the MIT License. Its original copyright and permission notice are preserved in [bilibili-accelerator-MIT.txt](docs/licenses/bilibili-accelerator-MIT.txt).
 
-上游采用 MIT License，版权声明为 `Copyright (c) 2026 realzza`。完整原文保留在 [docs/licenses/bilibili-accelerator-MIT.txt](docs/licenses/bilibili-accelerator-MIT.txt)。BiliSmooth 的项目许可证不替代该上游声明。
+Copyright (c) 2026 realzza
 
-本次来源核对使用上游提交 [`81438a3d9060bc59f9af08534bb94f1a4332db6e`](https://github.com/realzza/bilibili-accelerator/tree/81438a3d9060bc59f9af08534bb94f1a4332db6e)：[README](https://github.com/realzza/bilibili-accelerator/blob/81438a3d9060bc59f9af08534bb94f1a4332db6e/README.md)、[核心重写代码](https://github.com/realzza/bilibili-accelerator/blob/81438a3d9060bc59f9af08534bb94f1a4332db6e/src/core/rewrite.js)、[页面运行时代码](https://github.com/realzza/bilibili-accelerator/blob/81438a3d9060bc59f9af08534bb94f1a4332db6e/src/page/bili-accelerator.page.js)、[LICENSE](https://github.com/realzza/bilibili-accelerator/blob/81438a3d9060bc59f9af08534bb94f1a4332db6e/LICENSE)。这是来源核对快照，不代表项目最初基于该提交创建。
+## 随扩展打包的组件 / Bundled components
 
-BiliSmooth is based on Bilibili Accelerator by realzza and retains upstream routing conventions while developing its own current module structure and controls. The original MIT copyright and permission notice are preserved in the linked license file.
+- **Motion**, including the Framer Motion, motion-dom, and motion-utils portions used by the extension. MIT License; notice included as `control/motion-LICENSE.txt` in the extension.
+- **Tabler Icons**, used for interface icons. MIT License; notice included as `control/tabler-LICENSE.txt` in the extension.
 
-## Locally bundled components
+上述组件的许可文件随安装包保留。动效代码与图标均随扩展打包，无需从远程 CDN 加载可执行代码。BiliSmooth 标识为本项目的独立矢量图形。
 
-BiliSmooth includes the following locally bundled components and assets:
+The applicable license notices are included in the extension package. Animation code and icons are bundled locally; the extension does not load executable code from a remote CDN. The BiliSmooth mark is a project-specific vector asset.
 
-- Motion 13.2.0 (including Framer Motion, motion-dom and motion-utils portions used by the bundle). MIT notices are preserved in control/motion-LICENSE.txt.
-- Tabler Icons outline paths. The applicable MIT notice is preserved in control/tabler-LICENSE.txt.
+BiliSmooth 是独立项目，不隶属于哔哩哔哩，也未获得其背书。
 
-The BiliSmooth brand mark is a project-specific vector asset. The extension does not fetch executable animation code or icon assets from a runtime CDN.
+BiliSmooth is an independent project and is not affiliated with or endorsed by Bilibili.
+
+## 演示画面 / Demonstration imagery
+
+README 与商店截图中的演示视频、封面和标题均为本项目制作。
+
+The demo video, cover, and title used in the README and store screenshots were created for BiliSmooth.

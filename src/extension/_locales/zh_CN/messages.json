@@ -1,0 +1,6 @@
+{
+  "extensionName": { "message": "BiliSmooth - B站播放助手" },
+  "extensionDescription": { "message": "切换 B 站视频 CDN，在浮窗中查看下载速度、可播时长和播放状态。" },
+  "actionTitle": { "message": "BiliSmooth - 播放仪表盘" },
+  "commandDescription": { "message": "打开 BiliSmooth 播放仪表盘" }
+}

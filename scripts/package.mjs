@@ -23,7 +23,7 @@ if (JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Package
 const input = await Promise.all(files.map(async name => ({ name, bytes: await readFile(path.join(directory, name)) })));
 for (const { name, bytes } of input) {
   if (name !== 'BUILD.json' && hash(bytes) !== build.outputSha256[name]) throw new Error('Output changed after build: ' + name);
-  if (!/^(?:manifest\.json|BUILD\.json|playback\.js|content\.js|background\.js|icon\.[a-f0-9]{12}\.svg|surface\.js|entry-display\.js|motion-runtime\.js|choice\.js|settings(?:-migration)?\.js|LICENSE|NOTICE\.md|README(?:\.en)?\.md|PRIVACY\.md|CHANGELOG\.md|RELEASE\.md|docs\/licenses\/bilibili-accelerator-MIT\.txt|docs\/images\/floating-preview\.png|icons\/(?:16|32|48|128)\.[a-f0-9]{12}\.png|control\/[a-zA-Z0-9_./-]+\.(?:html|css|js|svg|png|txt))$/.test(name))
+  if (!/^(?:manifest\.json|BUILD\.json|playback\.js|content\.js|background\.js|_locales\/(?:en|zh_CN)\/messages\.json|icon\.[a-f0-9]{12}\.svg|surface\.js|entry-display\.js|motion-runtime\.js|choice\.js|settings(?:-migration)?\.js|LICENSE|NOTICE\.md|README(?:\.en)?\.md|PRIVACY(?:\.en)?\.md|CHANGELOG\.md|RELEASE\.md|docs\/licenses\/bilibili-accelerator-MIT\.txt|icons\/(?:16|32|48|128)\.[a-f0-9]{12}\.png|control\/[a-zA-Z0-9_./-]+\.(?:html|css|js|svg|png|txt))$/.test(name))
     throw new Error('Unexpected package path: ' + name);
 }
 // Standard ZIP deflate + CRC32, with paths relative to the extension root.

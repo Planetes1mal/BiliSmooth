@@ -7,6 +7,7 @@ const { createHash } = require('node:crypto');
 
 test('release gate reads synchronized versions and exact nonempty dated sections', async () => {
   const { checkRelease } = await import('../scripts/release.mjs');
+  const { extractReleaseNotes } = await import('../scripts/changelog.mjs');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bilismooth-release-gate-'));
   const write = async (name, value) => { const file = path.join(root, name); await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, typeof value === 'string' ? value : JSON.stringify(value)); };
@@ -15,16 +16,19 @@ test('release gate reads synchronized versions and exact nonempty dated sections
     await write('package-lock.json', { version: '2.8.2', packages: { '': { version: '2.8.2' } } });
     await write('src/extension/manifest.json', { version: '2.8.2' });
     await write('src/page/passive-session.js', 'const VERSION = "2.8.2";');
-    await write('CHANGELOG.md', '# Changes\n\n## 2.8.2 — 2026-09-15\n\nRelease changes.\n');
-    await write('docs/releases/2.8.2.md', '# BiliSmooth 2.8.2 · First public release\n\nInstall the attached ZIP.');
-    assert.equal((await checkRelease({ root, tag: 'v2.8.2' })).date, '2026-09-15');
+    const notes = '### 中文\n\n- 更清楚的线路状态。\n\n### English\n\n- Clearer route status.\n';
+    const changelog = `# Changes\n\n## 2.8.20 — 2026-09-16\n\nNewer notes.\n\n## 2.8.2 — 2026-09-15\n\n${notes}\n## 2.8.1 — 2026-09-14\n\nOlder notes.\n`;
+    await write('CHANGELOG.md', changelog);
+    const release = await checkRelease({ root, tag: 'v2.8.2' });
+    assert.equal(release.date, '2026-09-15');
+    assert.equal(release.notesPath, 'outputs/release-notes-2.8.2.md');
+    assert.equal(extractReleaseNotes(changelog, '2.8.2').body, notes);
     await assert.rejects(checkRelease({ root, tag: 'v2.8.20' }), /does not match/);
-    for (const bad of ['## 2.8.20 — 2026-09-15\nChanges.', '## 2.8.2 — 2026-09-15\n\n## Older\nChanges.', '## 2.8.2 — 2026-02-30\nChanges.']) {
+    for (const bad of ['## 2.8.20 — 2026-09-15\nChanges.', '## 2.8.2 — 2026-09-15\n\n## Older\nChanges.', '## 2.8.2 — 2026-02-30\nChanges.',
+      '## 2.8.2 — 2026-09-15\nFirst.\n\n## 2.8.2 — 2026-09-15\nDuplicate.']) {
       await write('CHANGELOG.md', bad); await assert.rejects(checkRelease({ root }), /heading|empty|date/);
     }
     await write('CHANGELOG.md', '## 2.8.2 — 2026-09-15\nChanges.');
-    await write('docs/releases/2.8.2.md', '# BiliSmooth 2.8.20\n\nWrong version.');
-    await assert.rejects(checkRelease({ root }), /Release notes/);
     await write('src/extension/manifest.json', { version: '2.8.1' });
     await assert.rejects(checkRelease({ root }), /versions must match/);
   } finally { await fs.rm(root, { recursive: true, force: true }); }

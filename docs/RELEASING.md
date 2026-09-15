@@ -7,11 +7,13 @@
 ## 1. 准备改动
 
 1. 查看 `git status --short`、当前分支、远程地址和暂存区，明确本次改动范围。
-2. 完成实现及受影响的说明。发布新版本时同步 `package.json`、`package-lock.json` 的两处版本、`src/extension/manifest.json`、`src/page/passive-session.js`，以及 README 中的版本与下载文件名。
-3. 在 `CHANGELOG.md` 添加唯一、非空的 `## <version> — YYYY-MM-DD` 节；准备 `docs/releases/<version>.md`，首行以 `# BiliSmooth <version>` 开头。Release 正文直接使用此文件，安装包也包含同一份说明。
+2. 完成实现及受影响的说明。发布新版本时同步 `package.json`、`package-lock.json` 的两处版本、`src/extension/manifest.json` 和 `src/page/passive-session.js`。README 下载链接指向最新 Release，无需每版改写。
+3. 在 `CHANGELOG.md` 添加唯一、非空的 `## <version> — YYYY-MM-DD` 节，中英文列在同一节内。构建脚本准确提取该节，生成 `outputs/release-notes-<version>.md` 和安装包内的 `RELEASE.md`；Actions 直接使用生成正文。
 4. 按改动选择已有验证。纯流程改动不运行真实网站或完整前端矩阵；播放行为改动按 [播放验证指南](validation/playback-testing.md) 选择有区分力的检查。
 
 公开文案写给使用者：介绍功能、安装、使用及用户可见的变化。测试数量、通过率、测速数据、播放观察、研究过程和内部版本沿革仅保存到本地忽略目录；不放进 README、CHANGELOG、Release 正文或安装包，也不在这些页面链接实验报告。发布前检查说明正文及 ZIP 中附带的文档。
+
+更新记录按影响筛选，不按开发工作量凑条目：新增能力、修复的具体症状、行为变化，以及用户需要处理的兼容性或权限变化。每条只写一个变化，优先使用“修复切换视频后浮窗仍显示上一视频状态”这类具体句子，避免“优化稳定性”“完善底层逻辑”等泛泛表述。不写内部函数名、候选节点枚举、测试数量和审查过程。分类仅在有助于阅读时使用，短版本直接列条目；Release 不重复安装教程，特殊升级操作仅写在受影响的版本中。
 
 `node_modules/`、`dist/`、`outputs/`、`work/` 和 `archive/` 是本地产物，不加入提交。保留已有无关修改；发布脚本要求干净的工作区，必要时在独立工作区准备已授权的发布内容。
 
@@ -72,6 +74,8 @@ npm run release:verify
 
 完成后报告提交 SHA、Release 链接、附件校验结果及实际失败或未验证的限制。保留 `outputs/` 中的本地构建与校验依据。
 
-## 设计依据
+## Chrome Web Store 材料
 
-按 [OpenAI 的技能与提示设计文章](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra)，根 `AGENTS.md` 只保留稳定约束、按需入口和完成标准，机械检查由脚本承担。发布流程参考 Wider Gemini 的版本标签校验、共享打包入口和标签触发发布；BiliSmooth 使用自己的构建与 ZIP 校验流程，不引入其商店上传或候选版本约定。
+商店与 GitHub 共用经过校验的扩展 ZIP。商店介绍、审核说明和图片在 `docs/chrome-web-store/` 维护；`npm run store:prepare` 生成忽略目录中的提交材料。修改权限、网络访问或设置存储时，同步 `PRIVACY.md`、`PRIVACY.en.md` 和商店数据披露。
+
+准备材料不等于提交审核。实际提交在用户要求上架时执行，先确认公开隐私链接可访问、后台声明与当前代码一致，再上传相同版本的 ZIP。商店审核进度不影响既有 GitHub Release；未通过审核前不得加入可用商店下载链接。

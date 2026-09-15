@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "BiliSmooth · B站流畅播放",
-  "version": "2.8.2",
+  "name": "__MSG_extensionName__",
+  "version": "2.8.3",
+  "default_locale": "en",
   "minimum_chrome_version": "120",
-  "description": "本地选择视频线路，观察缓冲余量，辅助恢复 B 站播放。无需服务器。",
+  "description": "__MSG_extensionDescription__",
   "permissions": [
     "storage"
   ],
   "host_permissions": [
-    "https://*.bilibili.com/*",
-    "https://*.bilibili.tv/*"
+    "https://*.bilibili.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -21,7 +21,7 @@
     "128": "icons/128.png"
   },
   "action": {
-    "default_title": "BiliSmooth · 播放控制",
+    "default_title": "__MSG_actionTitle__",
     "default_icon": {
       "16": "icons/16.png",
       "32": "icons/32.png",
@@ -31,6 +31,7 @@
   },
   "commands": {
     "_execute_action": {
+      "description": "__MSG_commandDescription__",
       "suggested_key": {
         "default": "Alt+Shift+B"
       }
@@ -39,8 +40,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*.bilibili.com/*",
-        "https://*.bilibili.tv/*"
+        "https://*.bilibili.com/*"
       ],
       "js": [
         "playback.js"
@@ -50,8 +50,7 @@
     },
     {
       "matches": [
-        "https://*.bilibili.com/*",
-        "https://*.bilibili.tv/*"
+        "https://*.bilibili.com/*"
       ],
       "js": [
         "settings.js",

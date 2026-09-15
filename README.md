@@ -2,84 +2,56 @@
 
 **简体中文** | [English](./README.en.md)
 
-[![Version](https://img.shields.io/badge/version-2.8.2-0f766e)](https://github.com/Planetes1mal/BiliSmooth/releases/latest)
-![Manifest V3](https://img.shields.io/badge/Manifest-V3-4285f4)
-![Chrome / Edge 120+](https://img.shields.io/badge/Chrome%20%2F%20Edge-120%2B-4285f4)
-[![MIT License](https://img.shields.io/badge/license-MIT-64748b)](./LICENSE)
+[![Version](https://img.shields.io/github/v/release/Planetes1mal/BiliSmooth?color=0f766e&label=version)](https://github.com/Planetes1mal/BiliSmooth/releases/latest)
+[![License](https://img.shields.io/github/license/Planetes1mal/BiliSmooth?color=64748b)](./LICENSE)
 
-**看见 B 站视频的下载速度、可播余量和实际线路，在卡顿时尝试更合适的 CDN。**
+为 B 站网页播放切换 CDN 线路，在视频旁查看下载速度和缓冲余量。
 
-BiliSmooth 是适用于 Chrome、Edge 的本地播放辅助扩展。它把实时指标和选线操作放在视频页浮窗中，并提供独立仪表盘，保持播放器中选择的画质。
+[下载](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [更新记录](./CHANGELOG.md) · [反馈问题](https://github.com/Planetes1mal/BiliSmooth/issues)
 
-<img src="./docs/images/floating-preview.png" width="320" alt="BiliSmooth 浮窗界面预览">
+<img src="https://raw.githubusercontent.com/Planetes1mal/BiliSmooth/main/docs/images/floating-demo.gif" width="960" alt="BiliSmooth 视频页浮窗：查看下载速度和可播余量，展开后选择播放线路">
 
-*浮窗界面示意，使用演示数据。*
+*使用自制演示视频展示界面。*
 
-[下载最新版本](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [报告问题](https://github.com/Planetes1mal/BiliSmooth/issues) · [更新记录](./CHANGELOG.md)
+## 功能
 
-## 为什么做这个项目
+- **边看边查看状态**：浮窗显示下载速度、可播余量和当前线路，支持拖动、贴边和收起。
+- **按倍速显示可播时长**：例如已缓冲 20 秒视频，在 2 倍速下显示约 10 秒可播余量。
+- **自动或手动选线**：自动选择 CDN，也可以固定一条线路；播放卡住时，可尝试备用线路。
+- **集中查看和调整**：仪表盘提供下载曲线、线路信息和设置，支持中英文界面、浅色与深色主题。
 
-我在海外读书时，经常遇到 B 站视频反复缓冲。除了尝试更合适的线路，我也希望在观看时直接看到：下载有没有继续、当前倍速还能播放多久，以及实际由哪条线路供片。
-
-BiliSmooth 参考并改造了 [realzza/bilibili-accelerator](https://github.com/realzza/bilibili-accelerator) 的线路处理与配置策略，在此基础上围绕自己的观看习惯设计浮窗、可播余量和线路仪表盘。感谢 realzza 以 MIT 许可公开这些工作。
-
-## 可以做什么
-
-| 功能 | 观看时的用途 |
-| --- | --- |
-| **视频页浮窗** | 查看真实下载速度、播放状态、可播余量和线路；可拖动、贴边、展开操作面板。 |
-| **按倍速计算余量** | 显示还能持续观看的时间。例如缓冲了 20 秒视频，在 2× 下可播放约 10 秒。 |
-| **自动或固定选线** | 根据当前网络探测和播放反馈选择 CDN，也可以手动固定节点。 |
-| **卡顿恢复** | 在自动选线启用时，按播放状态尝试备用线路，并区分恢复尝试与已观察到的恢复。 |
-| **独立仪表盘** | 集中查看下载曲线、实际供片、线路表现和运行记录，调整主题、语言与浮窗内容。 |
-
-4K 等清晰度取决于 B 站提供的片源及账号权限；扩展保留你在播放器中选择的画质。
+<img src="https://raw.githubusercontent.com/Planetes1mal/BiliSmooth/main/docs/images/dashboard.png" width="960" alt="BiliSmooth 仪表盘，展示播放状态、下载曲线和线路信息">
 
 ## 安装
 
-需要 **Chrome 或 Edge 120 及以上版本**。目前通过 GitHub Release 安装，尚未上架扩展商店。
+适用于桌面版 Chrome 和 Edge。Chrome 需要版本 120 或更新。目前通过 GitHub 下载，尚未在 Chrome 应用商店上架。
 
-1. 在 [Releases](https://github.com/Planetes1mal/BiliSmooth/releases/latest) 下载 **`BiliSmooth-2.8.2.zip`** 并解压。选择这个安装包，无需下载 GitHub 自动生成的 Source code 压缩包。
-2. 在浏览器地址栏打开 `chrome://extensions`，或在 Edge 中打开 `edge://extensions`。
+1. 打开 [最新 Release](https://github.com/Planetes1mal/BiliSmooth/releases/latest)，下载 `BiliSmooth-<版本号>.zip` 并解压。
+2. 在地址栏打开 `chrome://extensions`；Edge 使用 `edge://extensions`。
 3. 开启 **开发者模式**，点击 **加载已解压的扩展程序**。
-4. 选择解压后包含 **`manifest.json`** 的文件夹。
-5. 刷新已打开的 B 站视频页。看到 BiliSmooth 浮窗即表示页面端已加载；工具栏图标可以打开仪表盘。
+4. 选择解压后包含 `manifest.json` 的文件夹。
+5. 刷新 B 站视频页，即可看到浮窗。点击浏览器工具栏中的扩展图标，可以打开仪表盘。
 
-请保留解压后的文件夹，浏览器会继续从这里加载扩展。
+请下载 BiliSmooth 安装包，而非 GitHub 自动提供的 **Source code**。安装后保留解压文件夹，浏览器会继续从中加载扩展。
 
-**升级：** 将新版解压到原安装目录，进入扩展管理页点击 BiliSmooth 的重新加载按钮，再刷新视频页。已有偏好会保留。
+**更新：** 将新版文件解压到原安装目录，在扩展管理页重新加载 BiliSmooth，再刷新视频页。已有设置会保留。
 
-## 开始使用
+## 使用
 
-1. **正常播放视频。** 默认自动选线；先观察浮窗中的速度与可播余量。
-2. **需要调整时展开浮窗。** 可启停优化、选择线路、尝试备用线路或重新评估网络。
-3. **打开仪表盘看详情。** 点击扩展工具栏图标，或使用浏览器中已配置的 `Alt+Shift+B` 快捷键。
+正常打开 B 站视频即可，默认开启自动选线。点击浮窗可展开控制面板，选择线路或调整显示内容；手动固定线路后，自动换线会暂停。
 
-手动固定线路后，自动换线会暂停。修改需要刷新才能完整生效的设置时，界面会给出提示。关闭优化并按提示刷新视频页，可使用原站线路。
+需要恢复原站播放线路时，在浮窗中关闭优化，并按提示刷新视频页。
 
-## 隐私与权限
+扩展保留播放器中选择的画质，不会解锁会员清晰度或地区限制。不同网络下的线路表现可能不同。
 
-扩展使用本地存储权限及 B 站页面访问权限，用于保存偏好、连接视频页和处理播放请求。无需创建额外账户，也没有云同步。视频标题和封面用于当前界面；诊断导出会排除视频元数据与完整媒体地址。
+## 隐私
 
-详见 [隐私说明](./PRIVACY.md) 和 [第三方组件及来源](./NOTICE.md)。
+无需额外注册，也不向开发者发送遥测数据。设置保存在本机；播放请求会发送到所选 CDN，启用 MCDN 代理时会通过对应代理服务。
 
-## 开发与贡献
+数据处理和权限用途见 [隐私说明](./PRIVACY.md)。
 
-需要 **Node.js 24+**。从仓库根目录执行：
+## 贡献与许可
 
-```sh
-npm ci --ignore-scripts
-npm run build
-```
+欢迎通过 [Issues](https://github.com/Planetes1mal/BiliSmooth/issues) 报告问题或提出建议。参与开发请阅读 [贡献指南](./CONTRIBUTING.md)。
 
-然后按安装步骤加载 **`dist/extension`**。运行 `npm test` 可检查播放核心。
-
-- [贡献指南](./CONTRIBUTING.md)：提交问题、改动范围与本地验证。
-- [架构说明](./docs/architecture.md)：模块职责和播放请求流程。
-- [2.8.2 版本说明](./docs/releases/2.8.2.md)：功能介绍与安装方法。
-
-遇到问题时，请在 [Issues](https://github.com/Planetes1mal/BiliSmooth/issues) 中提供浏览器与扩展版本、视频页面、画质、倍速，以及预期和实际表现。
-
-## 许可与致谢
-
-BiliSmooth 使用 [MIT 许可](./LICENSE)。线路与配置相关工作基于 [realzza/bilibili-accelerator](https://github.com/realzza/bilibili-accelerator) 的 MIT 开源代码进行改造；界面使用 Motion 和 Tabler Icons。相关归属和许可见 [NOTICE.md](./NOTICE.md)。
+本项目以 [MIT 许可证](./LICENSE) 开源。线路处理与配置部分基于 [realzza/bilibili-accelerator](https://github.com/realzza/bilibili-accelerator) 改造，界面使用 Motion 和 Tabler Icons。完整归属见 [第三方声明](./NOTICE.md)。

@@ -44,7 +44,15 @@ def verify(version):
         assert manifest['manifest_version'] == 3
         assert 'default_popup' not in manifest['action']
         assert manifest['permissions'] == ['storage']
-        assert manifest['host_permissions'] == ['https://*.bilibili.com/*', 'https://*.bilibili.tv/*']
+        assert manifest['host_permissions'] == ['https://*.bilibili.com/*']
+        assert all(entry['matches'] == ['https://*.bilibili.com/*'] for entry in manifest['content_scripts']), 'Content-script matches must stay within the supported site'
+        assert manifest['default_locale'] == 'en', 'The English default locale is missing'
+        message_keys = set(re.findall(r'__MSG_(\w+)__', package.read('manifest.json').decode()))
+        for locale in ('en', 'zh_CN'):
+            locale_path = f'_locales/{locale}/messages.json'
+            messages = json.loads(package.read(locale_path))
+            assert all(messages.get(key, {}).get('message', '').strip() for key in message_keys), f'Unresolved manifest messages: {locale}'
+            assert package.read(locale_path) == local('src/extension/' + locale_path).read_bytes(), f'Locale differs: {locale}'
         main = [entry for entry in manifest['content_scripts'] if entry.get('world') == 'MAIN']
         assert len(main) == 1 and main[0]['js'] == ['playback.js']
         assert sorted(names) == sorted([*build['outputSha256'], 'BUILD.json']), 'Build hash listing mismatch'
@@ -83,16 +91,17 @@ def verify(version):
         assert package.read('motion-runtime.js') == local('src/ui/motion-runtime.js').read_bytes()
         assert b'BiliSmoothMotion' in package.read('motion-runtime.js')
         assert '../motion-runtime.js' in package.read('control/index.html').decode()
-        for name in ('LICENSE', 'NOTICE.md', 'README.md', 'README.en.md', 'PRIVACY.md', 'CHANGELOG.md',
+        for name in ('LICENSE', 'NOTICE.md', 'README.md', 'README.en.md', 'PRIVACY.md', 'PRIVACY.en.md', 'CHANGELOG.md',
                      'docs/licenses/bilibili-accelerator-MIT.txt'):
             assert package.read(name) == local(name).read_bytes(), f'Release documentation differs: {name}'
+        assert package.read('RELEASE.md') == local(f'outputs/release-notes-{version}.md').read_bytes(), 'Generated release notes differ'
         upstream_license = package.read('docs/licenses/bilibili-accelerator-MIT.txt')
         assert b'MIT License' in upstream_license and b'Copyright' in upstream_license, 'Upstream license notice missing'
         result = {'passed': True, 'archive': listing['archive'], 'sha256': listing['sha256'], 'files': len(names),
                   'checks': ['ZIP CRC', 'Release SHA256SUMS matches ZIP', 'Exact unique safe package paths', 'Each packaged file matches release hashes and current build',
                              'Build source and output hashes match current workspace', 'Consistent version and one MAIN bundle',
                              'No toolbar popup; storage-only permissions and video-site hosts',
-                             'Manifest, background and HTML resource references resolve', 'Toolbar PNG dimensions', 'Tabler and Motion licenses preserved',
+                             'Manifest locale messages, background and HTML resource references resolve', 'Toolbar PNG dimensions', 'Tabler and Motion licenses preserved',
                              'Bilingual README, privacy, changelog and unchanged upstream MIT notice included', 'Motion is locally bundled in both surfaces'],
                   'references': sorted(set(references)), 'iconDimensions': dimensions}
         return result
