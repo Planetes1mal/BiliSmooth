@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.x'
+      - run: npm ci --ignore-scripts
+      - name: Check commit messages
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          FORCED_PUSH: ${{ github.event.forced }}
+        run: |
+          if [[ "$FORCED_PUSH" == true || -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            node scripts/check-commit-message.mjs --range="$HEAD_SHA"
+          else
+            node scripts/check-commit-message.mjs --range="$BASE_SHA..$HEAD_SHA"
+          fi
+      - run: npm run test:workflow
+      - run: npm test
+      - run: npm run build
+      - run: node scripts/package.mjs
+      - run: python scripts/verify-package.py

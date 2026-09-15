@@ -1,0 +1,25 @@
+# Dependencies, generated extension, and local verification evidence
+/node_modules/
+/dist/
+/outputs/
+/work/
+/archive/
+/docs/research/
+/docs/validation/evidence/
+/docs/validation/[0-9]*.md
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+*.local
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
+/.idea/
+/.vscode/
+__pycache__/
+*.py[cod]

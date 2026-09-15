@@ -1,0 +1,56 @@
+{
+  "name": "bilismooth",
+  "version": "2.8.2",
+  "private": true,
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "description": "Smoother Bilibili playback for overseas viewers.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test --test-reporter=tap test/frame-monitor.test.js test/media-observer.test.js test/routing-contracts.test.js test/playback-kernel.test.js test/passive-session.test.js test/settings-content.test.js test/settings-kernel.test.js test/playback-feedback.test.js test/playback-recovery.test.js test/control-bridge.test.js test/floating-bridge.test.js test/speed-chart.test.js",
+    "test:cdn": "node scripts/check-cdn.cjs",
+    "test:browser": "node scripts/check-playback.cjs",
+    "test:compare": "node scripts/check-playback.cjs --compare",
+    "test:recovery": "node scripts/check-startup-recovery.cjs",
+    "test:lifecycle": "node scripts/check-request-lifecycle.cjs",
+    "test:ui": "node scripts/check-control-ui.cjs",
+    "test:floating": "node --test test/floating-control.test.js",
+    "test:design": "node scripts/check-design-adoption.cjs",
+    "prepare": "npm run build",
+    "test:theme": "node scripts/check-theme-readability.cjs",
+    "test:motion": "node --test test/motion-preferences.test.js test/floating-hover.test.js",
+    "test:tooling": "node --test test/validation-support.test.js",
+    "package": "node scripts/package.mjs",
+    "verify:package": "python scripts/verify-package.py",
+    "test:workflow": "node --test test/commit-workflow.test.js test/release-workflow.test.js",
+    "commit": "node scripts/commit.mjs",
+    "commit:check": "node scripts/check-commit-message.mjs",
+    "release:check": "node scripts/release.mjs check",
+    "release": "node scripts/release.mjs publish",
+    "release:verify": "node scripts/release.mjs verify"
+  },
+  "keywords": [
+    "bilibili",
+    "chrome",
+    "cdn",
+    "edge",
+    "webextension"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "motion": "13.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "playwright": "1.62.1"
+  },
+  "homepage": "https://github.com/Planetes1mal/BiliSmooth",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Planetes1mal/BiliSmooth.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Planetes1mal/BiliSmooth/issues"
+  }
+}

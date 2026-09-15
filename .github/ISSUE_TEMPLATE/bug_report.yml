@@ -1,0 +1,32 @@
+name: 问题反馈 / Bug report
+description: 报告播放、浮窗或设置问题 / Report a playback or interface issue
+body:
+  - type: markdown
+    attributes:
+      value: "请勿附 Cookie、完整签名媒体 URL、精确位置或浏览器用户目录。Please redact private information."
+  - type: input
+    id: version
+    attributes:
+      label: 扩展版本 / Extension version
+      placeholder: 2.8.2
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 浏览器与系统 / Browser and OS
+      placeholder: Chrome 151 / Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 现象与复现步骤 / Behavior and steps to reproduce
+      description: "说明实际结果与预期结果；播放问题请注明画质、倍速、自动或固定线路。Include quality, playback rate, and route mode where relevant."
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 补充信息 / Additional context
+      description: "可选：公开视频链接、已检查过的诊断附件、截图、国家或地区及运营商。Optional public video URL, redacted diagnostics, screenshot, or broad network region."

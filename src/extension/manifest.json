@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "BiliSmooth · B站流畅播放",
+  "version": "2.8.2",
+  "minimum_chrome_version": "120",
+  "description": "本地选择视频线路，观察缓冲余量，辅助恢复 B 站播放。无需服务器。",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.bilibili.com/*",
+    "https://*.bilibili.tv/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "BiliSmooth · 播放控制",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+B"
+      }
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.bilibili.com/*",
+        "https://*.bilibili.tv/*"
+      ],
+      "js": [
+        "playback.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://*.bilibili.com/*",
+        "https://*.bilibili.tv/*"
+      ],
+      "js": [
+        "settings.js",
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}

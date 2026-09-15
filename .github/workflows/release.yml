@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.x'
+      - name: Check shared release gate
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node scripts/release.mjs check --tag "$RELEASE_TAG"
+          version="$(node -p "require('./package.json').version")"
+          printf 'RELEASE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run test:workflow
+      - run: npm run build
+      - run: node scripts/package.mjs
+      - run: python scripts/verify-package.py
+      - name: Upload draft assets and verify before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if draft="$(gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json isDraft --jq .isDraft)"; then
+            if [[ "$draft" != true ]]; then
+              echo 'Release is already published; its assets will not be changed.' >&2
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GH_REPO" --draft --verify-tag \
+              --title "BiliSmooth $RELEASE_VERSION" \
+              --notes-file "docs/releases/$RELEASE_VERSION.md"
+          fi
+          gh release upload "$RELEASE_TAG" \
+            "outputs/BiliSmooth-$RELEASE_VERSION.zip" \
+            outputs/SHA256SUMS.txt --repo "$GH_REPO" --clobber
+          node scripts/release.mjs verify --tag "$RELEASE_TAG" --draft
+          gh release edit "$RELEASE_TAG" --repo "$GH_REPO" --draft=false --latest \
+            --title "BiliSmooth $RELEASE_VERSION" --notes-file "docs/releases/$RELEASE_VERSION.md"
