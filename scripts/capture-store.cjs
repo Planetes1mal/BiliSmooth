@@ -12,20 +12,27 @@ const demoImageURL = 'https://i0.hdslb.com/bfs/bilismooth-demo/test-video.png';
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help')) {
-    console.log(`Usage: npm run store:capture
+    console.log(`Usage: npm run store:capture [-- --locale=zh-CN]
 
 Build the extension first with npm run build. Requires Playwright Chromium and
 Python with Pillow; set PYTHON to choose the Python executable.
 Captures the actual extension in a fresh work/store-capture-* browser profile,
 saves English store screenshots, and encodes docs/images/floating-demo.gif.
+With --locale=zh-CN, saves only four Chinese store screenshots and leaves the
+English screenshots and README images unchanged.
 The video page and cover are served locally from scripts/fixtures/store-demo.html
 and docs/images/test-video.png. Remote web requests are blocked. Playback uses a
 local canvas stream, so these images demonstrate the UI, not CDN performance.
 This command does not upload or publish anything.`);
     return;
   }
-  if (args.length) throw new Error(`Unknown argument: ${args[0]}. Use --help.`);
-  const demoHTML = await fs.readFile(path.join(__dirname, 'fixtures/store-demo.html'), 'utf8');
+  if (args.length > 1 || args.some(arg => !['--locale=en', '--locale=zh-CN'].includes(arg))) {
+    throw new Error(`Unknown argument: ${args.join(' ')}. Use --help.`);
+  }
+  const locale = args[0] === '--locale=zh-CN' ? 'zh-CN' : 'en';
+  const language = locale === 'zh-CN' ? 'zh' : 'en';
+  const demoHTML = (await fs.readFile(path.join(__dirname, 'fixtures/store-demo.html'), 'utf8'))
+    .replace('<html lang="en">', `<html lang="${locale}">`);
   const demoImage = await fs.readFile(path.join(images, 'test-video.png'));
 
   const { chromium } = require('playwright');
@@ -33,7 +40,7 @@ This command does not upload or publish anything.`);
   const out = await fs.mkdtemp(path.join(root, 'work', 'store-capture-'));
   const frames = path.join(out, 'frames');
   const context = await chromium.launchPersistentContext(path.join(out, 'profile'), {
-    channel: 'chromium', headless: true, locale: 'en-US',
+    channel: 'chromium', headless: true, locale: locale === 'zh-CN' ? 'zh-CN' : 'en-US',
     viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1,
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--autoplay-policy=no-user-gesture-required']
   });
@@ -52,11 +59,11 @@ This command does not upload or publish anything.`);
     const initial = await worker.evaluate(() => ({ manifest: chrome.runtime.getManifest(), language: chrome.i18n.getUILanguage() }));
     console.log(JSON.stringify({ stage: 'installed', version: initial.manifest.version, name: initial.manifest.name,
       language: initial.language, permissions: initial.manifest.host_permissions }));
-    await worker.evaluate(async () => {
+    await worker.evaluate(async language => {
       const key = 'bilismooth.config.v4';
       const old = (await chrome.storage.local.get(key))[key] || {};
-      await chrome.storage.local.set({ [key]: { ...old, lang: 'en', theme: 'light', accent: 'teal' } });
-    });
+      await chrome.storage.local.set({ [key]: { ...old, lang: language, theme: 'light', accent: 'teal' } });
+    }, language);
     const page = await context.newPage();
     for (const old of context.pages()) if (old !== page) await old.close();
     const response = await page.goto(demoURL, { waitUntil: 'domcontentloaded', timeout: 45000 });
@@ -79,22 +86,24 @@ This command does not upload or publish anything.`);
     await fs.mkdir(images, { recursive: true });
     await host.locator('#bs-edge').hover(); await host.locator('#bs-move').click();
     await page.mouse.move(700, 100); await page.waitForTimeout(700);
-    await page.screenshot({ path: path.join(assets, 'screenshot-floating-en.png') });
+    await page.screenshot({ path: path.join(assets, `screenshot-floating-${locale}.png`), omitBackground: false });
     await host.locator('#bs-close').click(); await page.mouse.click(200, 110); await page.mouse.move(10, 790);
-    await page.setViewportSize({ width: 960, height: 600 }); await page.waitForTimeout(600);
+    if (locale === 'en') {
+      await page.setViewportSize({ width: 960, height: 600 }); await page.waitForTimeout(600);
 
-    await fs.mkdir(frames, { recursive: true });
-    let frame = 0;
-    const shots = async count => {
-      for (let n = 0; n < count; n++) {
-        await page.screenshot({ path: path.join(frames, `frame-${String(frame++).padStart(3, '0')}.png`) });
-        await page.waitForTimeout(80);
-      }
-    };
-    await shots(8); await host.locator('#bs-edge').hover(); await shots(6);
-    await host.locator('#bs-move').click(); await page.mouse.move(10, 590); await shots(8);
-    await host.locator('#bs-route').click(); await shots(9); await page.keyboard.press('Escape'); await shots(3);
-    await host.locator('#bs-close').click(); await page.mouse.click(200, 110); await page.mouse.move(10, 590); await shots(6);
+      await fs.mkdir(frames, { recursive: true });
+      let frame = 0;
+      const shots = async count => {
+        for (let n = 0; n < count; n++) {
+          await page.screenshot({ path: path.join(frames, `frame-${String(frame++).padStart(3, '0')}.png`) });
+          await page.waitForTimeout(80);
+        }
+      };
+      await shots(8); await host.locator('#bs-edge').hover(); await shots(6);
+      await host.locator('#bs-move').click(); await page.mouse.move(10, 590); await shots(8);
+      await host.locator('#bs-route').click(); await shots(9); await page.keyboard.press('Escape'); await shots(3);
+      await host.locator('#bs-close').click(); await page.mouse.click(200, 110); await page.mouse.move(10, 590); await shots(6);
+    }
 
     const id = new URL(worker.url()).hostname;
     const sourceId = await worker.evaluate(async actualURL => {
@@ -109,16 +118,16 @@ This command does not upload or publish anything.`);
     const controlId = await control.evaluate(() => new Promise(resolve => chrome.tabs.getCurrent(tab => resolve(tab.id))));
     await worker.evaluate(async tab => chrome.tabs.setZoom(tab, 0.85), controlId);
     await control.waitForTimeout(2000);
-    await control.screenshot({ path: path.join(assets, 'screenshot-dashboard-en.png') });
-    await fs.copyFile(path.join(assets, 'screenshot-dashboard-en.png'), path.join(images, 'dashboard.png'));
+    await control.screenshot({ path: path.join(assets, `screenshot-dashboard-${locale}.png`), omitBackground: false });
+    if (locale === 'en') await fs.copyFile(path.join(assets, 'screenshot-dashboard-en.png'), path.join(images, 'dashboard.png'));
     await control.locator('nav [data-page="routes"]').click(); await control.waitForTimeout(700);
-    await control.screenshot({ path: path.join(assets, 'screenshot-routes-en.png') });
+    await control.screenshot({ path: path.join(assets, `screenshot-routes-${locale}.png`), omitBackground: false });
     await control.locator('nav [data-page="settings"]').click(); await control.waitForTimeout(700);
-    await control.screenshot({ path: path.join(assets, 'screenshot-preferences-en.png') });
+    await control.screenshot({ path: path.join(assets, `screenshot-preferences-${locale}.png`), omitBackground: false });
     console.log(JSON.stringify({ stage: 'dashboard', language: await control.locator('html').getAttribute('lang'),
       title: await control.locator('#video-title').innerText() }));
     const details = {
-      version: initial.manifest.version, page: demoURL, cover: demoImageURL,
+      version: initial.manifest.version, language, locale, page: demoURL, cover: demoImageURL,
       title: await control.locator('#video-title').innerText(),
       mediaSource: 'Locally rendered canvas stream; no CDN performance samples.',
       blockedRequests: [...blockedRequests]
@@ -127,6 +136,10 @@ This command does not upload or publish anything.`);
     console.log(JSON.stringify({ stage: 'local-only', ...details }));
   } finally { await context.close(); }
 
+  if (locale === 'zh-CN') {
+    console.log(JSON.stringify({ screenshots: assets, locale, capture: out }));
+    return;
+  }
   const gif = path.join(images, 'floating-demo.gif');
   await new Promise((resolve, reject) => {
     const child = spawn(process.env.PYTHON || 'python', ['-c', `

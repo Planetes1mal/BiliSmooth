@@ -49,6 +49,13 @@
     </div>
   </main>
   <script>
+    const isChinese = document.documentElement.lang === 'zh-CN';
+    if (isChinese) {
+      document.querySelector('.label').textContent = '界面演示';
+      document.querySelector('.demo-label').textContent = '演示视频';
+      document.querySelector('.caption p').textContent = '原创演示画面 · 本地播放';
+      document.querySelector('#playback').textContent = '暂停';
+    }
     (async () => {
       const artwork = new Image();
       artwork.crossOrigin = 'anonymous';
@@ -69,9 +76,9 @@
       const toggle = document.querySelector('#playback');
       toggle.addEventListener('click', async () => {
         if (video.paused) await video.play(); else video.pause();
-        toggle.textContent = video.paused ? 'Play' : 'Pause';
+        toggle.textContent = isChinese ? (video.paused ? '播放' : '暂停') : (video.paused ? 'Play' : 'Pause');
       });
-    })().catch(error => { document.querySelector('.caption p').textContent = 'Demo video could not start.'; console.error(error); });
+    })().catch(error => { document.querySelector('.caption p').textContent = isChinese ? '演示视频未能启动。' : 'Demo video could not start.'; console.error(error); });
   </script>
 </body>
 </html>

@@ -4,6 +4,15 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === '--help') {
+  console.log('Usage: node scripts/prepare-store.mjs [--release-assets=<directory>]');
+  console.log('Use verified release assets when updating store materials for a published version.');
+  process.exit(0);
+}
+if (args.length > 1 || (args.length === 1 && !/^--release-assets=.+$/.test(args[0])))
+  throw new Error('Expected --release-assets=<directory>, or no arguments for a local build.');
+const releaseAssets = args.length ? path.resolve(root, args[0].slice('--release-assets='.length)) : null;
 const workspace = relative => {
   const target = path.resolve(root, relative);
   if (!target.startsWith(path.resolve(root) + path.sep)) throw new Error('Store output must stay inside the workspace.');
@@ -16,8 +25,15 @@ const documents = ['README.md', 'listing.en.md', 'listing.zh-CN.md', 'privacy-fi
 const dimensions = {
   'icon-128.png': [128, 128],
   'promo-small-440x280.png': [440, 280],
+  'promo-marquee-1400x560.png': [1400, 560],
+  'screenshot-floating-zh-CN.png': [1280, 800],
+  'screenshot-dashboard-zh-CN.png': [1280, 800],
+  'screenshot-routes-zh-CN.png': [1280, 800],
+  'screenshot-preferences-zh-CN.png': [1280, 800],
   'screenshot-dashboard-en.png': [1280, 800],
-  'screenshot-floating-en.png': [1280, 800]
+  'screenshot-floating-en.png': [1280, 800],
+  'screenshot-routes-en.png': [1280, 800],
+  'screenshot-preferences-en.png': [1280, 800]
 };
 
 function run(command, args) {
@@ -39,14 +55,32 @@ for (const locale of ['en', 'zh_CN']) {
 }
 for (const [file, [width, height]] of Object.entries(dimensions)) {
   const bytes = await readFile(path.join(source, 'assets', file));
-  if (bytes.length < 24 || bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' ||
+  if (bytes.length < 29 || bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' ||
       bytes.readUInt32BE(16) !== width || bytes.readUInt32BE(20) !== height)
     throw new Error(`${file} must be a ${width} × ${height} PNG.`);
+  if (file !== 'icon-128.png' && (bytes[24] !== 8 || bytes[25] !== 2))
+    throw new Error(`${file} must be a 24-bit RGB PNG without an alpha channel.`);
 }
 
-await run(process.execPath, ['scripts/build.mjs']);
-await run(process.execPath, ['scripts/package.mjs']);
-await run(python, ['scripts/verify-package.py']);
+const packageSource = releaseAssets || path.join(root, 'outputs');
+if (releaseAssets) {
+  await run(python, ['-c', `
+from pathlib import Path
+import hashlib, json, sys, zipfile
+folder, version = Path(sys.argv[1]), sys.argv[2]
+archive = folder / f'BiliSmooth-{version}.zip'
+checksums = dict((name.lstrip('*'), digest) for digest, name in
+                 (line.split(maxsplit=1) for line in (folder / 'SHA256SUMS.txt').read_text(encoding='utf-8').splitlines() if line.strip()))
+assert checksums.get(archive.name) == hashlib.sha256(archive.read_bytes()).hexdigest(), 'Published archive SHA-256 mismatch'
+with zipfile.ZipFile(archive) as package:
+    assert package.testzip() is None, 'Published archive CRC failure'
+    assert json.loads(package.read('manifest.json'))['version'] == version, 'Published archive version mismatch'
+`, releaseAssets, version]);
+} else {
+  await run(process.execPath, ['scripts/build.mjs']);
+  await run(process.execPath, ['scripts/package.mjs']);
+  await run(python, ['scripts/verify-package.py']);
+}
 
 const output = workspace(`outputs/chrome-web-store-${version}`);
 const stage = await mkdtemp(workspace(`outputs/.chrome-web-store-${version}-`));
@@ -57,7 +91,7 @@ for (const file of documents) {
 }
 for (const file of ['PRIVACY.md', 'PRIVACY.en.md']) await copyFile(path.join(root, file), path.join(stage, file));
 for (const file of [`BiliSmooth-${version}.zip`, 'SHA256SUMS.txt'])
-  await copyFile(path.join(root, 'outputs', file), path.join(stage, file));
+  await copyFile(path.join(packageSource, file), path.join(stage, file));
 await cp(path.join(source, 'assets'), path.join(stage, 'assets'), { recursive: true });
 
 let archive = `${output}-materials.zip`;
@@ -99,4 +133,4 @@ try {
   else if (error.code !== 'ENOENT') throw error;
 }
 await rename(stagedArchive, archive);
-console.log(JSON.stringify({ version, upload: path.join(output, `BiliSmooth-${version}.zip`), materials: output, archive, previous, previousArchive }));
+console.log(JSON.stringify({ version, packageSource, upload: path.join(output, `BiliSmooth-${version}.zip`), materials: output, archive, previous, previousArchive }));
