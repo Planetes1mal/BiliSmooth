@@ -31,6 +31,7 @@
     "release:verify": "node scripts/release.mjs verify",
     "store:prepare": "node scripts/prepare-store.mjs",
     "store:capture": "node scripts/capture-store.cjs",
+    "demo:record": "node scripts/capture-demo-video.cjs",
     "store:artwork": "node scripts/make-store-promo.cjs"
   },
   "keywords": [

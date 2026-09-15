@@ -9,7 +9,7 @@ Switch CDN routes for Bilibili videos and see download speed and playable buffer
 
 [Download](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [Changelog](./CHANGELOG.md) · [Report an issue](https://github.com/Planetes1mal/BiliSmooth/issues)
 
-<img src="https://raw.githubusercontent.com/Planetes1mal/BiliSmooth/main/docs/images/floating-demo.gif" width="960" alt="BiliSmooth floating panel showing download speed and playable buffer, with controls for choosing a video delivery route">
+https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
 
 *Interface shown with a demo video.*
 

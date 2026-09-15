@@ -1,6 +1,5 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 const extension = path.join(root, 'dist/extension');
@@ -14,12 +13,12 @@ async function main() {
   if (args.includes('--help')) {
     console.log(`Usage: npm run store:capture [-- --locale=zh-CN]
 
-Build the extension first with npm run build. Requires Playwright Chromium and
-Python with Pillow; set PYTHON to choose the Python executable.
+Build the extension first with npm run build. Requires Playwright Chromium.
 Captures the actual extension in a fresh work/store-capture-* browser profile,
-saves English store screenshots, and encodes docs/images/floating-demo.gif.
+saves English store screenshots and docs/images/dashboard.png.
 With --locale=zh-CN, saves only four Chinese store screenshots and leaves the
 English screenshots and README images unchanged.
+Use npm run demo:record separately to record the README video.
 The video page and cover are served locally from scripts/fixtures/store-demo.html
 and docs/images/test-video.png. Remote web requests are blocked. Playback uses a
 local canvas stream, so these images demonstrate the UI, not CDN performance.
@@ -38,7 +37,6 @@ This command does not upload or publish anything.`);
   const { chromium } = require('playwright');
   await fs.mkdir(path.join(root, 'work'), { recursive: true });
   const out = await fs.mkdtemp(path.join(root, 'work', 'store-capture-'));
-  const frames = path.join(out, 'frames');
   const context = await chromium.launchPersistentContext(path.join(out, 'profile'), {
     channel: 'chromium', headless: true, locale: locale === 'zh-CN' ? 'zh-CN' : 'en-US',
     viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1,
@@ -88,22 +86,6 @@ This command does not upload or publish anything.`);
     await page.mouse.move(700, 100); await page.waitForTimeout(700);
     await page.screenshot({ path: path.join(assets, `screenshot-floating-${locale}.png`), omitBackground: false });
     await host.locator('#bs-close').click(); await page.mouse.click(200, 110); await page.mouse.move(10, 790);
-    if (locale === 'en') {
-      await page.setViewportSize({ width: 960, height: 600 }); await page.waitForTimeout(600);
-
-      await fs.mkdir(frames, { recursive: true });
-      let frame = 0;
-      const shots = async count => {
-        for (let n = 0; n < count; n++) {
-          await page.screenshot({ path: path.join(frames, `frame-${String(frame++).padStart(3, '0')}.png`) });
-          await page.waitForTimeout(80);
-        }
-      };
-      await shots(8); await host.locator('#bs-edge').hover(); await shots(6);
-      await host.locator('#bs-move').click(); await page.mouse.move(10, 590); await shots(8);
-      await host.locator('#bs-route').click(); await shots(9); await page.keyboard.press('Escape'); await shots(3);
-      await host.locator('#bs-close').click(); await page.mouse.click(200, 110); await page.mouse.move(10, 590); await shots(6);
-    }
 
     const id = new URL(worker.url()).hostname;
     const sourceId = await worker.evaluate(async actualURL => {
@@ -136,24 +118,7 @@ This command does not upload or publish anything.`);
     console.log(JSON.stringify({ stage: 'local-only', ...details }));
   } finally { await context.close(); }
 
-  if (locale === 'zh-CN') {
-    console.log(JSON.stringify({ screenshots: assets, locale, capture: out }));
-    return;
-  }
-  const gif = path.join(images, 'floating-demo.gif');
-  await new Promise((resolve, reject) => {
-    const child = spawn(process.env.PYTHON || 'python', ['-c', `
-from pathlib import Path
-from PIL import Image
-import sys
-frames = [Image.open(file).convert('RGB').quantize(colors=128, dither=Image.Dither.NONE)
-          for file in sorted(Path(sys.argv[1]).glob('frame-*.png'))]
-frames[0].save(sys.argv[2], save_all=True, append_images=frames[1:], duration=200, loop=0, optimize=True)
-`, frames, gif], { cwd: root, shell: false, stdio: 'inherit' });
-    child.on('error', reject);
-    child.on('close', code => code === 0 ? resolve() : reject(new Error(`GIF encoding failed (${code}); PNG frames remain at ${frames}.`)));
-  });
-  console.log(JSON.stringify({ screenshots: assets, gif, capture: out }));
+  console.log(JSON.stringify({ screenshots: assets, locale, capture: out }));
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

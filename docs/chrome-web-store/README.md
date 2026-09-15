@@ -26,7 +26,13 @@ npm run store:prepare -- --release-assets=outputs/published-v2.8.3
 
 上传到商店的代码包是材料目录内的 `BiliSmooth-<版本号>.zip`。外层 `-materials.zip` 用于保存全部文案和图片，不是扩展安装包。实际提交前，公开英文隐私链接须可访问，并在开发者后台核对发布者账号与申报字段。
 
-界面或标识变化后，智能体按需更新素材：`npm run store:artwork` 从项目矢量标识生成宣传图；`npm run build` 后，运行 `npm run store:capture -- --locale=zh-CN` 生成中文界面截图，运行 `npm run store:capture -- --locale=en` 生成英文截图。捕获在独立临时浏览器的离线演示页中展示当前扩展界面，同时生成 README GIF。演示页使用本项目制作的视频、封面和 `Test video` 标题，不接收外部视频地址，也不随扩展打包。捕获需要已有 Playwright Chromium 和 Python Pillow；材料打包本身只用 Python 标准库。先检查是否已有依赖，不自动安装工具。新截图只检查一次尺寸、内容和清晰度，不当作播放性能结论。
+界面或标识变化后，智能体按需更新素材：`npm run store:artwork` 从项目矢量标识生成宣传图；`npm run build` 后，运行 `npm run store:capture -- --locale=zh-CN` 生成中文界面截图，运行 `npm run store:capture -- --locale=en` 生成英文截图。捕获在独立临时浏览器的离线演示页中展示当前扩展界面。演示页使用本项目制作的视频、封面和 `Test video` 标题，不接收外部视频地址，也不随扩展打包。截图需要已有 Playwright Chromium；材料打包使用 Python 标准库。先检查是否已有依赖，不自动安装工具。新截图只检查一次尺寸、内容和清晰度，不当作播放性能结论。
+
+## README 演示视频
+
+运行 `npm run demo:record` 生成本地 60 fps 预览 `outputs/readme-demo/floating-demo-preview.mp4`；`-- --locale=en` 另存英文版 `floating-demo-preview-en.mp4`。真实界面录制与鼠标、镜头合成分开进行：鼠标平滑移动，点击时短暂按压，镜头靠近浮窗，菜单展开后停留，再返回全景。原始录屏与动作时间线保存在忽略的 `work/demo-video-*` 中。脚本不改写 README 或商店截图，也不自动上传。
+
+先交付本地视频供用户确认，确认后再替换公开演示。README 使用 GitHub 附件视频播放器：智能体通过 GitHub 的附件上传接口或 Markdown 编辑器上传 MP4，取得 `https://github.com/user-attachments/assets/...` 链接，单独成段替换中英文 README 中的旧链接，并在 Preview 中确认可以播放。附件接口可复用已有的仓库写入凭据，其调用方式见 [GitHub CLI 的附件实现](https://github.com/cli/cli/blob/trunk/internal/attachments/client.go)；不为获取链接创建 Issue。上传附件不等于提交 README，提交与推送仍按用户请求执行。普通仓库文件路径不能代替附件地址来内嵌播放器。视频保持在 10 MB 以下，使用 H.264 编码；规格见 [GitHub 附件说明](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/attaching-files)。
 
 ## 图片规格
 

@@ -62,16 +62,26 @@
       artwork.src = 'https://i0.hdslb.com/bfs/bilismooth-demo/test-video.png';
       await artwork.decode();
       const canvas = document.createElement('canvas');
-      canvas.width = 1280;
-      canvas.height = 720;
+      const motion = new URLSearchParams(location.search).get('motion') === '1';
+      canvas.width = motion ? 960 : 1280;
+      canvas.height = motion ? 540 : 720;
       const graphics = canvas.getContext('2d');
       const scale = Math.max(canvas.width / artwork.width, canvas.height / artwork.height);
       const width = artwork.width * scale, height = artwork.height * scale;
-      const draw = () => graphics.drawImage(artwork, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+      const draw = () => {
+        const zoom = motion ? 1.015 + Math.sin(performance.now() / 6000) * .008 : 1;
+        graphics.drawImage(artwork, (canvas.width - width * zoom) / 2,
+          (canvas.height - height * zoom) / 2, width * zoom, height * zoom);
+      };
       draw();
       const video = document.querySelector('video');
-      video.srcObject = canvas.captureStream(30);
-      setInterval(draw, 1000 / 30);
+      video.srcObject = canvas.captureStream(motion ? 60 : 30);
+      if (motion) {
+        const animate = () => { draw(); requestAnimationFrame(animate); };
+        requestAnimationFrame(animate);
+      } else {
+        setInterval(draw, 1000 / 30);
+      }
       await video.play();
       const toggle = document.querySelector('#playback');
       toggle.addEventListener('click', async () => {

@@ -9,7 +9,7 @@
 
 [下载](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [更新记录](./CHANGELOG.md) · [反馈问题](https://github.com/Planetes1mal/BiliSmooth/issues)
 
-<img src="https://raw.githubusercontent.com/Planetes1mal/BiliSmooth/main/docs/images/floating-demo.gif" width="960" alt="BiliSmooth 视频页浮窗：查看下载速度和可播余量，展开后选择播放线路">
+https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
 
 *使用自制演示视频展示界面。*
 

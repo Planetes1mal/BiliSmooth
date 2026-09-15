@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>BiliSmooth demo video renderer</title>
+<style>
+  html, body { margin: 0; background: #e4ece6; }
+  canvas { display: block; width: 100vw; height: auto; }
+</style>
+<canvas id="output"></canvas>
+<script>
+  const canvas = document.querySelector('#output');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const FPS = 60;
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const ease = t => t * t * t * (t * (t * 6 - 15) + 10);
+
+  function interpolate(points, time, defaults) {
+    if (!points.length) return defaults;
+    if (time <= points[0].time) return { ...defaults, ...points[0] };
+    let next = points.findIndex(point => point.time > time);
+    if (next < 0) return { ...defaults, ...points.at(-1) };
+    const from = { ...defaults, ...points[next - 1] };
+    const to = { ...defaults, ...points[next] };
+    const progress = ease(clamp((time - from.time) / (to.time - from.time), 0, 1));
+    return Object.fromEntries(Object.keys(defaults).map(key =>
+      [key, from[key] + (to[key] - from[key]) * progress]));
+  }
+
+  // Coordinates belong to the unscaled source. The frame and its shadow stay
+  // fixed while the camera moves inside it, as in a screen-recording editor.
+  function createScene(video, timeline, width, height) {
+    const sourceWidth = video.videoWidth;
+    const sourceHeight = video.videoHeight;
+    const fit = Math.min(width * (8 / 9) / sourceWidth, height * (8 / 9) / sourceHeight);
+    const frame = {
+      width: sourceWidth * fit,
+      height: sourceHeight * fit,
+      radius: width / 90
+    };
+    frame.x = (width - frame.width) / 2;
+    frame.y = (height - frame.height) / 2;
+    const pointer = timeline.pointer || [];
+    const camera = timeline.camera || [];
+    const clicks = pointer.filter((point, index) => point.pressed && !pointer[index - 1]?.pressed);
+    const background = document.createElement('canvas');
+    background.width = width;
+    background.height = height;
+    const backdrop = background.getContext('2d');
+    const wash = backdrop.createLinearGradient(0, 0, width, height);
+    wash.addColorStop(0, '#eef2e9');
+    wash.addColorStop(.55, '#dce9e2');
+    wash.addColorStop(1, '#cbded5');
+    backdrop.fillStyle = wash;
+    backdrop.fillRect(0, 0, width, height);
+    backdrop.shadowColor = 'rgba(26, 56, 44, .19)';
+    backdrop.shadowBlur = width / 36;
+    backdrop.shadowOffsetY = height / 55;
+    backdrop.fillStyle = '#ffffff';
+    backdrop.beginPath();
+    backdrop.roundRect(frame.x, frame.y, frame.width, frame.height, frame.radius);
+    backdrop.fill();
+
+    const arrow = new Path2D('M 0 0 L 0 25 L 6.3 19.2 L 11.3 30.4 L 16 28.2 L 10.9 17.7 L 19.7 17.6 Z');
+    const draw = time => {
+      const view = interpolate(camera, time, { scale: 1, x: sourceWidth / 2, y: sourceHeight / 2 });
+      const scale = Math.max(1, view.scale);
+      const cropWidth = sourceWidth / scale;
+      const cropHeight = sourceHeight / scale;
+      const left = clamp(view.x - cropWidth / 2, 0, sourceWidth - cropWidth);
+      const top = clamp(view.y - cropHeight / 2, 0, sourceHeight - cropHeight);
+      const pixels = frame.width / cropWidth;
+      const screenPoint = point => ({ x: frame.x + (point.x - left) * pixels, y: frame.y + (point.y - top) * pixels });
+
+      ctx.drawImage(background, 0, 0);
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(frame.x, frame.y, frame.width, frame.height, frame.radius);
+      ctx.clip();
+      ctx.drawImage(video, left, top, cropWidth, cropHeight, frame.x, frame.y, frame.width, frame.height);
+
+      if (pointer.length) {
+        const position = screenPoint(interpolate(pointer, time, { x: sourceWidth / 2, y: sourceHeight / 2 }));
+        const click = clicks.findLast(point => point.time <= time);
+        const elapsed = click ? time - click.time : Infinity;
+        let pressScale = 1;
+        if (elapsed < .075) pressScale = 1 - .14 * ease(elapsed / .075);
+        else if (elapsed < .24) pressScale = .86 + .14 * ease((elapsed - .075) / .165);
+
+        if (elapsed < .3) {
+          const origin = screenPoint(click);
+          const progress = elapsed / .3;
+          ctx.fillStyle = `rgba(47, 109, 96, ${.13 * (1 - progress)})`;
+          ctx.beginPath();
+          ctx.arc(origin.x, origin.y, (12 + progress * 7) * width / 1440, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.save();
+        ctx.translate(position.x, position.y);
+        ctx.scale(pressScale * width / 1440, pressScale * width / 1440);
+        ctx.shadowColor = 'rgba(10, 28, 22, .30)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetY = 2;
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#24372f';
+        ctx.lineWidth = 1.65;
+        ctx.lineJoin = 'round';
+        ctx.fill(arrow);
+        ctx.shadowColor = 'transparent';
+        ctx.stroke(arrow);
+        ctx.restore();
+      }
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(255, 255, 255, .65)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(frame.x + .5, frame.y + .5, frame.width - 1, frame.height - 1, frame.radius);
+      ctx.stroke();
+    };
+    return { draw, sourceWidth, sourceHeight };
+  }
+
+  /**
+   * timeline: { duration: seconds,
+   *   pointer: [{ time: seconds, x: sourcePixels, y: sourcePixels, pressed?: true }],
+   *   camera: [{ time: seconds, scale: 1..1.5, x: centerX, y: centerY }] }
+   * Repeat a position at a later time to hold it. A pressed point marks the
+   * start of a short click animation; include a later unpressed point before
+   * another click. Input arrays are ordered by time.
+   */
+  window.renderDemo = async ({ sourceURL, timeline, outputWidth = 1440, outputHeight = 900, bitrate = 10000000 }) => {
+    const mimeType = 'video/mp4;codecs=avc1.42002a';
+    if (!MediaRecorder.isTypeSupported(mimeType)) throw new Error('H.264 Level 4.2 MP4 recording is required.');
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;pointer-events:none';
+    document.body.append(video);
+    const loaded = new Promise((resolve, reject) => {
+      video.addEventListener('loadeddata', resolve, { once: true });
+      video.addEventListener('error', () => reject(new Error('Cannot load the source recording.')), { once: true });
+    });
+    video.src = sourceURL;
+    await loaded;
+    const firstFrame = new Promise(resolve => video.requestVideoFrameCallback(resolve));
+    await video.play();
+    await firstFrame;
+    video.pause();
+    // Fragmented MP4 metadata can initially report only the first fragment.
+    // Use the recorded timeline; the playback loop also stops at the true end.
+    const duration = timeline.duration;
+    if (!Number.isFinite(duration) || duration <= 0) throw new Error('A finite, positive timeline duration is required.');
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+    const scene = createScene(video, timeline, outputWidth, outputHeight);
+    scene.draw(0);
+    const stream = canvas.captureStream(0);
+    const track = stream.getVideoTracks()[0];
+    const parts = [];
+    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
+    recorder.addEventListener('dataavailable', event => { if (event.data.size) parts.push(event.data); });
+    const stopped = new Promise((resolve, reject) => {
+      recorder.addEventListener('stop', resolve, { once: true });
+      recorder.addEventListener('error', event => reject(event.error), { once: true });
+    });
+    let frames = 0;
+    let lastDraw = -Infinity;
+    try {
+      await new Promise(resolve => {
+        recorder.addEventListener('start', resolve, { once: true });
+        recorder.start();
+      });
+      track.requestFrame();
+      await video.play();
+      await new Promise(resolve => {
+        const tick = now => {
+          const time = Math.min(video.currentTime, duration);
+          if (now - lastDraw >= 1000 / FPS - 1 || video.ended || time >= duration) {
+            scene.draw(time);
+            track.requestFrame();
+            frames++;
+            lastDraw = now;
+          }
+          if (video.ended || time >= duration) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      video.pause();
+      // Keep the last canvas frame available for capture before closing the
+      // encoder. It also remains visible in the page for a local preview.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      recorder.stop();
+      await stopped;
+      const blob = new Blob(parts, { type: 'video/mp4' });
+      const base64 = await new Promise(resolve => {
+        const reader = new FileReader();
+        reader.addEventListener('load', () => resolve(reader.result.split(',')[1]), { once: true });
+        reader.readAsDataURL(blob);
+      });
+      return {
+        base64, mimeType, width: outputWidth, height: outputHeight,
+        seconds: duration, requestedFPS: FPS, requestedFrames: frames,
+        sourceWidth: scene.sourceWidth, sourceHeight: scene.sourceHeight, bytes: blob.size
+      };
+    } finally {
+      video.pause();
+      if (recorder.state !== 'inactive') recorder.stop();
+      stream.getTracks().forEach(item => item.stop());
+      video.removeAttribute('src');
+      video.load();
+      video.remove();
+    }
+  };
+</script>
+</html>
