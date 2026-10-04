@@ -152,9 +152,9 @@
       const { snapshot, connected, lang } = options;
       const type = types.includes(options.type) ? options.type : 'status-logo';
       if (!item || item.type !== type) build(type);
-      const playback = shared.projectPlayback(snapshot, connected), available = connected && !!snapshot?.media?.present;
+      const playback = shared.projectPlayback(snapshot, connected), available = connected && !!snapshot?.media?.present && !snapshot.availability;
       const motion = options.motion !== false && !document.hidden && !snapshot?.hidden && !reduced?.matches && inView;
-      const statusLabel = label(playback, lang);
+      const statusLabel = connected && shared.format.availability(snapshot?.availability, lang)?.title || label(playback, lang);
       let description = statusLabel;
       if (item.signal) { item.signal.dataset.playback = playback; item.signal.dataset.motion = motion ? 'on' : 'off'; }
       if (statusOnly) { item.face.setAttribute('aria-label', statusLabel); return; }

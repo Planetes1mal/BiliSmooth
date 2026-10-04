@@ -146,6 +146,7 @@
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   function projectPlayback(snapshot, connected = true) {
     if (!connected || !snapshot) return 'disconnected';
+    if (snapshot.availability) return 'error';
     const media = snapshot.media || {};
     if (!media.present) return 'waiting';
     if (media.errorCode || media.playback === 'error') return 'error';
@@ -160,6 +161,14 @@
     return health.state === 'healthy' && fresh && !snapshot.hidden && (!finite(health.ageMs) || health.ageMs <= Math.min(3000, health.thresholdMs || 3000)) ? 'smooth' : 'playing';
   }
   const format = Object.freeze({
+    availability(value, lang) {
+      if (!value) return null;
+      const region = value.reason === 'region', english = lang === 'en';
+      return { title: english ? region ? 'Region restriction' : 'Video unavailable' : region ? '站点地区限制' : '视频不可用',
+        copy: english ? region ? 'The site withheld playback addresses for your region. Changing CDN routes cannot resolve this.'
+          : 'The site did not provide a playback address. Route changes and network assessment are unavailable.'
+          : region ? '站点未提供可用播放地址，切换线路无法解决地区限制。' : '站点未提供可用播放地址，无法进行线路探测或切换。' };
+    },
     buffer(snapshot) { const rate = finite(snapshot?.rate) && snapshot.rate > 0 ? snapshot.rate : 1; return finite(snapshot?.bufferWallSeconds) ? snapshot.bufferWallSeconds : finite(snapshot?.buffer) ? snapshot.buffer / rate : null; },
     speed(snapshot) {
       // A recent observed idle window is a real zero, even without a new transfer.

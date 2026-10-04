@@ -24,6 +24,7 @@
   let episodeSampleAt = null, episodeSampleKind = null;
   let speedHistory = [], speedSamples = [], bufferHistory = [], sampledAt = 0, timer = null;
   let current = { present: false, playback: 'idle', frameHealth: { state: 'unknown' } };
+  let availability = null;
   let observedAt = 0, videoMeta = { title: '', url: '', coverUrl: '' }, metadataSignature = '', metadataTitle = '', pendingMetadataTitle = null, previousCoverUrl = '';
   let saveSerial = 0, latestSave = null, unsavedEdits = {}, settingsSave = { status: 'saved' };
   const pendingSaves = new Map(), SAVE_TIMEOUT_MS = 5000;
@@ -76,7 +77,7 @@
         markStartup('stableFramesAt'); startup.stableFrameEvidence = current.frameHealth.source;
       }
     }
-    startup.phase = player?.error ? 'error' : player?.ended ? 'ended' : startupPaused ? 'paused' :
+    startup.phase = availability || player?.error ? 'error' : player?.ended ? 'ended' : startupPaused ? 'paused' :
       player?.seeking ? startupPlaybackStarted ? 'seeking' : 'startup-seeking' : startup.stableFramesAt !== null ? 'stable' :
       startupPlaybackStarted ? healthy ? 'confirming-frames' : 'started' : 'preparing';
   }
@@ -310,6 +311,7 @@
       mediaGeneration, startupPending: startupPending() }) });
   configuring = false;
   function resetNetwork(reason = 'manual') {
+    refresh(); if (availability) return false;
     networkTransport = connectionType();
     networkEpoch++; resetSpeed();
     // In-flight observations and the current media catalog survive network re-evaluation.
@@ -383,9 +385,18 @@
       player.addEventListener(name, fn, { passive: true }); playerListeners.push([name, fn]);
     }
   }
+  function readAvailability() {
+    const block = document.getElementById?.('big-block-panel'), bounds = block?.getBoundingClientRect();
+    if (bounds?.width > 0 && bounds.height > 0 && /所在的地区无法观看|限定中国大陆地区播放/.test(block.textContent || ''))
+      return { reason: 'region' };
+    const error = scope.__INITIAL_STATE__?.error;
+    return (!player || !player.readyState) && (error?.trueCode === -404 || error?.code === 404)
+      ? { reason: 'unavailable', code: -404 } : null;
+  }
   function refresh() {
     if (suspended) return;
     bindPlayer(); const time = now();
+    availability = readAvailability();
     if (player && lastPosition !== null && player.currentTime > lastPosition + 0.005) lastMovedAt = time;
     lastPosition = player?.currentTime ?? null;
     const track = catalog.activeVideo(), width = player?.videoWidth || null, height = player?.videoHeight || null;
@@ -396,7 +407,7 @@
     if (waiting && active() && player.readyState >= 3 && health.state === 'healthy' && time - lastMovedAt <= 1500) {
       waiting = false; log('waiting-cleared', { reason: 'frames-and-clock-advancing', readyState: player.readyState, playhead: player.currentTime });
     }
-    let playback = !player || player.error || !player.readyState ? 'idle' : player.ended ? 'ended' : player.seeking ? 'seeking' : player.paused ? 'paused' : waiting || player.readyState < 3 ? 'buffering' : 'playing';
+    let playback = availability ? 'error' : !player || player.error || !player.readyState ? 'idle' : player.ended ? 'ended' : player.seeking ? 'seeking' : player.paused ? 'paused' : waiting || player.readyState < 3 ? 'buffering' : 'playing';
     if (playback === 'playing' && active() && (health.state === 'frozen' || health.source && health.reason === 'clock-not-advancing' && health.ageMs >= health.thresholdMs && time - lastMovedAt >= 2000)) playback = 'frozen';
     current = { present: !!player, playback, width, height, fps: matches && track.fps || null, fpsSource: matches && track.fps ? 'manifest' : null,
       duration: Number.isFinite(player?.duration) ? player.duration : null, currentTime: Number.isFinite(player?.currentTime) ? player.currentTime : null,
@@ -445,7 +456,7 @@
     const buffer = bufferSeconds(), rate = player?.playbackRate || 1, flags = kernel.getFlags?.() || {};
     // Read the session's existing observations only. Compact UI must not cause
     // another player scan, frame sample, rank construction or diagnostic clone.
-    return { version: VERSION, media: { ...current, frameHealth: { ...current.frameHealth } }, config: clone(config),
+    return { version: VERSION, media: { ...current, frameHealth: { ...current.frameHealth } }, availability: availability && { ...availability }, config: clone(config),
       status: current.playback === 'playing' && current.frameHealth.state === 'healthy' ? 'smooth' : current.playback,
       observedAt, hidden: !!document.hidden, videoMeta: { ...videoMeta }, rate, buffer,
       bufferMediaSeconds: buffer, bufferWallSeconds: bufferWallSeconds(buffer),
@@ -498,9 +509,9 @@
   function clearLogs() { events = []; criticalEvents = []; observations = []; episodes = []; droppedEvents = droppedCriticalEvents = droppedObservations = 0; }
   const api = {
     getState: state, getViewState: viewState, getConfig: () => clone(config), setConfig: save, flushSettings,
-    applyRoute(host) { if (!settings.isCdnHost(host)) return false; save({ enabled: true, selection: 'fixed', pcdnHost: host, mode: config.mode === 'off' ? 'bad-only' : config.mode }); return true; },
-    retry() { const result = kernel.retry(); notify(); return result !== false; }, resetNetwork,
-    boost() { save({ enabled: true, mode: 'force' }); return true; },
+    applyRoute(host) { refresh(); if (availability || !settings.isCdnHost(host)) return false; save({ enabled: true, selection: 'fixed', pcdnHost: host, mode: config.mode === 'off' ? 'bad-only' : config.mode }); return true; },
+    retry() { refresh(); if (availability) return false; const result = kernel.retry(); notify(); return result !== false; }, resetNetwork,
+    boost() { refresh(); if (availability) return false; save({ enabled: true, mode: 'force' }); return true; },
     reload() { persist(); return true; },
     clearEvents() { clearLogs(); notify(); },
     clearData() { endEpisode('clear-data'); save(settings.defaults); resetNetwork('clear-data'); clearLogs(); for (const key of Object.keys(counters)) counters[key] = 0; notify(); },

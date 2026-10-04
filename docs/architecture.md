@@ -56,6 +56,8 @@ BiliSmoothRoutingPolicy.addressForHost(rawUrl, host); // 改写后的地址字�
 
 `bufferWallSeconds` 是内容缓冲除以实际倍速，`media.currentTime/duration` 来自播放器。速度以近期有效媒体传输 Mbps 转为十进制 MB/s，低于 1 MB/s 时使用十进制 KB/s；未知样本不补造。`videoMeta` 的标题、页面 URL 和公共封面只服务当前视频卡片；页面身份变化先清除旧身份，封面更新独立检查。
 
+会话在已有观察周期中读取站点可见的地区限制提示与初始化数据中的视频不存在错误，输出 `availability`（region 或 unavailable），不把没有地址的站点拒绝解释为等待、缓冲或卡顿。提示消失时清除此状态；紧凑快照不额外扫描。两种界面共用本地化说明和错误投影，并停用当前视频的选线、重新评估及恢复命令，保留共用外观与其他设置。该观察不新增网络请求，也不尝试获取被站点拒绝的地址。
+
 ## 配置和消息
 
 `bilismooth.config.v4` 是唯一扩展设置权威。后台对 read/patch 串行执行“读取最新值 → 白名单合并 → 写入 → 回执”，避免多页整份覆盖。`floatingFields` 允许 status/speed/buffer，按固定顺序去重规范化，允许空数组；状态图形不受文字字段隐藏影响。
