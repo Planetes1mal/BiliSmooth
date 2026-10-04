@@ -300,6 +300,25 @@ test('reusing the player for new media cannot inherit the previous waiting deadl
   assert.ok(state.mediaGeneration > previousGeneration);
   assert.equal(early, 0, 'the new media needs its own full buffering grace period');
   assert.equal(state.recoveryAttempts, 1);
+
+  for (const transition of ['emptied', 'replacement']) {
+    const recovered = harness({ store: cachedStore(), config: { mode: 'bad-only' } });
+    recovered.request(media(A)); recovered.video.readyState = 2; recovered.buffer(0);
+    recovered.video.emit('waiting'); recovered.advance(2500);
+    assert.equal(recovered.kernel.getState().recoveries, 1);
+    let nextPlayer = recovered.video;
+    if (transition === 'emptied') {
+      recovered.video.readyState = 0; recovered.video.emit('emptied');
+      recovered.video.readyState = 2; recovered.video.emit('loadedmetadata');
+    } else { nextPlayer = emitter({ ...recovered.video, isConnected: true }); recovered.replacePlayer(nextPlayer); }
+    const nextMedia = recovered.request(media(A));
+    assert.equal(new URL(nextMedia.url).hostname, A, 'new media must not inherit the previous forced recovery route');
+    nextPlayer.emit('waiting'); recovered.advance(2499);
+    assert.equal(recovered.kernel.getState().recoveries, 1);
+    recovered.advance(1);
+    const recoveries = recovered.kernel.getState().recoveries; recovered.close();
+    assert.equal(recoveries, 2, 'new media receives its own grace period after an earlier recovery');
+  }
 });
 
 test('manual retry gives its selected CDN a full retry interval when a waiting timer already exists', () => {

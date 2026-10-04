@@ -94,6 +94,7 @@
       return prepared;
     }
     function planRoute(raw) {
+      if(recovery.avoidHost)watchVideo();
       const host=hostOf(raw);
       const failed=adaptive()&&config.selection==='auto'&&state.probeSamples.some(sample=>sample.host===host&&!sample.ok);
       const candidates=failed?recoveryCandidates():[];
@@ -158,7 +159,7 @@
       const evidence = playbackEvidence();
       const generation = evidence?.mediaGeneration ?? requestGeneration();
       if (generation !== feedbackGeneration) {
-        feedback?.resetWindow(); feedbackGeneration = generation; recentVideoFailure = null; recovery.tried.clear();
+        feedback?.resetWindow(); feedbackGeneration = generation; clearRecovery();
       }
       const request = { id: 'media-' + (++requestSerial), originalUrl: absolute(originalUrl), url: absolute(url), host: hostOf(url),
         transport, method, range, startedAt: now(), kind, networkEpoch,
@@ -273,6 +274,7 @@
     function onSuspend(){log('player-event',{source:'suspend',...playerContext()});}
     function onWaitInterrupted(event){
       cancelStall(event.type);
+      if(event.type==='emptied'){clearRecovery();feedback?.resetWindow();}
       // A seek may finish with only the current frame buffered and no second waiting event.
       if(event.type==='seeked'&&watchedVideo&&!watchedVideo.paused&&!watchedVideo.ended&&watchedVideo.readyState<3)onWaiting(event);
     }
@@ -283,12 +285,16 @@
     const playerHandlers=[['waiting',onWaiting],['stalled',onWaiting],['playing',onPlaying],['canplay',onPlaying],['suspend',onSuspend],
       ['pause',onWaitInterrupted],['seeking',onWaitInterrupted],['seeked',onWaitInterrupted],['emptied',onWaitInterrupted]];
     function unwatchVideo(){for(const [name,fn]of playerHandlers)watchedVideo?.removeEventListener?.(name,fn);}
+    function clearRecovery(){
+      recentVideoFailure=null;lastVideoHost=null;state.lastMediaHost=null;lastRecoveryAt=-Infinity;
+      recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);recovery.clearTimer=null;
+    }
     function watchVideo(){
       if(destroyed)return;const player=options.getPlayer?options.getPlayer():document?.querySelector?.('video');
       if(player===watchedVideo){
         if(active()&&config.stallRecovery&&config.selection==='auto'&&stallTimer===null&&frameNeedsRecovery())scheduleStall(Math.max(0,STALL_RETRY_MS-(wallNow()-lastRecoveryAt)),'confirmed-frame-stall');return;
       }
-      unwatchVideo();cancelStall('player-change');watchedVideo=player||null;recentVideoFailure=null;lastVideoHost=null;feedback?.resetWindow();
+      unwatchVideo();cancelStall('player-change');watchedVideo=player||null;clearRecovery();feedback?.resetWindow();
       for(const [name,fn]of playerHandlers)watchedVideo?.addEventListener(name,fn,{passive:true});
     }
     function resetNetwork(){
