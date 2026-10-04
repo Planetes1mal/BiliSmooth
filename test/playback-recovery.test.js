@@ -9,7 +9,7 @@ const ROOT = path.resolve(__dirname, '..');
 const A = 'upos-sz-mirroraliov.bilivideo.com';
 const B = 'upos-sz-mirrorcosov.bilivideo.com';
 const START = 1788836240000;
-const RANK_KEY = 'bilismooth.routing.rank.v3.America/New_York|en-US';
+const RANK_KEY = 'bilismooth.routing.rank.v4.America/New_York|en-US';
 const media = host => `https://${host}/upgcxcode/1/video.m4s`;
 function emitter(value = {}, { targetOnly = false } = {}) {
   const listeners = new Map();
@@ -266,6 +266,42 @@ test('low readyState waiting during a seek does not rotate until playback is wai
   assert.equal(afterSeek, 1, 'a new playback wait still reaches recovery after the seek');
 });
 
+test('a short pause or seek gives resumed buffering a fresh recovery grace period', () => {
+  for (const interruption of ['pause', 'seeking']) {
+    const h = harness({ store: cachedStore() });
+    h.video.readyState = 2; h.buffer(0); h.video.emit('waiting'); h.advance(2000);
+    if (interruption === 'pause') h.video.paused = true;
+    else h.video.seeking = true;
+    h.video.emit(interruption); h.advance(100, { move: false });
+    if (interruption === 'seeking') h.video.emit('waiting');
+    h.advance(150, { move: false });
+    h.video.paused = false; h.video.seeking = false;
+    h.video.emit(interruption === 'pause' ? 'play' : 'seeked');
+    if (interruption === 'pause') h.video.emit('waiting');
+    h.advance(2499);
+    const early = h.kernel.getState().recoveries;
+    h.advance(1);
+    const due = h.kernel.getState().recoveries; h.close();
+    assert.equal(early, 0, interruption + ' must discard the previous wait deadline');
+    assert.equal(due, 1, interruption + ' must still recover continued buffering after a full grace period');
+  }
+});
+
+test('reusing the player for new media cannot inherit the previous waiting deadline', () => {
+  const h = harness({ store: cachedStore() });
+  h.video.readyState = 2; h.buffer(0); h.video.emit('waiting'); h.advance(2000);
+  const previousGeneration = h.api.getState().mediaGeneration;
+  h.video.readyState = 0; h.video.emit('emptied'); h.advance(250, { move: false });
+  h.video.readyState = 2; h.video.emit('loadedmetadata'); h.video.emit('waiting');
+  h.advance(2499);
+  const early = h.kernel.getState().recoveries;
+  h.advance(1);
+  const state = h.api.getState(); h.close();
+  assert.ok(state.mediaGeneration > previousGeneration);
+  assert.equal(early, 0, 'the new media needs its own full buffering grace period');
+  assert.equal(state.recoveryAttempts, 1);
+});
+
 test('manual retry gives its selected CDN a full retry interval when a waiting timer already exists', () => {
   const h = harness({ store: cachedStore() });
   h.video.readyState = 2; h.buffer(0); h.video.emit('waiting'); h.advance(2000);
@@ -302,4 +338,46 @@ test('refresh must not immediately prefer a repeatedly failing route over subseq
     reloadedTarget: refreshed.api.getState().targetHost };
   refreshed.close();
   assert.notEqual(signal.reloadedTarget, A, 'recent repeated native video failures need a bounded memory across page refresh');
+});
+
+test('continued recovery excludes cached candidates whose probe delivered no bytes', () => {
+  const hosts = require('../src/core/settings.js').candidatePool;
+  const store = new Map([[RANK_KEY, JSON.stringify({ ranking: [A, B], at: START - 60000,
+    samples: hosts.map(host => ({ host, ok: [A, B].includes(host), bytes: [A, B].includes(host) ? 786432 : 0,
+      ttfb: [A, B].includes(host) ? 200 : null, mbps: [A, B].includes(host) ? 8 : 0,
+      elapsedMs: 1000, status: [A, B].includes(host) ? 200 : 0, error: [A, B].includes(host) ? '' : 'network' })) })]]);
+  const h = harness({ store });
+  h.video.readyState = 2; h.buffer(0); h.video.emit('waiting'); h.advance(17500);
+  const targets = h.api.getDiagnostics().events.filter(event => event.type === 'recovery-attempt').map(event => event.toHost);
+  h.close();
+  assert.ok(targets.length >= 3, 'the fixture reaches continued recovery after exhausting the successful probes');
+  assert.ok(targets.every(host => [A, B].includes(host)), 'recovery must not resurrect known failed probe hosts');
+});
+
+test('recovery uses healthy ranking without assuming the configured target supplied the stalled request', () => {
+  const C = 'upos-sz-mirrorhwb.bilivideo.com';
+  const untriedStore = new Map([[RANK_KEY, JSON.stringify({ ranking: [A, B, C], samples: [], at: START - 60000 })]]);
+  const untried = harness({ store: untriedStore, config: { mode: 'bad-only' } });
+  const original = untried.request(media(B));
+  assert.equal(new URL(original.url).hostname, B, 'the player still uses its original healthy-CDN URL');
+  untried.video.readyState = 2; untried.buffer(0); untried.video.emit('waiting'); untried.advance(2500);
+  const selected = untried.api.getState().targetHost;
+  const redirected = untried.request(media(B));
+  const attempt = untried.api.getDiagnostics().events.find(event => event.type === 'recovery-attempt');
+  untried.close();
+  assert.equal(selected, A, 'a configured target with no failed request must remain the best recovery choice');
+  assert.equal(new URL(redirected.url).hostname, A, 'recovery must activate the existing target for the actual stalled host');
+  assert.equal(attempt?.fromHost, B); assert.equal(attempt?.toHost, A);
+
+  const store = new Map([[RANK_KEY, JSON.stringify({ ranking: [A, B, C], samples: [], at: START - 60000 })]]);
+  const h = harness({ store, config: { mode: 'bad-only' } });
+  h.advance(2000, { frames: true });
+  for (let index = 0; index < 3; index++) {
+    const xhr = h.request(media(C)); h.buffer(30); h.advance(5000, { frames: true }); xhr.complete(1048576);
+  }
+  assert.equal(h.kernel.getState().effectiveRanking[0], C, 'real stable delivery promotes a host above the current target');
+  assert.equal(h.api.getState().targetHost, A);
+  h.request(media(A)); h.video.readyState = 2; h.buffer(0); h.video.emit('waiting'); h.advance(2500);
+  const target = h.api.getState().targetHost; h.close();
+  assert.equal(target, C, 'a reordered ranking must be consulted from its best candidate instead of the current target index');
 });

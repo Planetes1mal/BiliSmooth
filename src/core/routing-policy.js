@@ -163,8 +163,11 @@
               if (!generated.length) continue;
               const previous = Array.isArray(item[backup]) ? item[backup] : [];
               const addresses = new Set();
-              for (const list of [generated, previous]) for (const raw of list) if (addresses.size < 8) addresses.add(raw);
-              const next = [...addresses];
+              // Reserve native fallbacks before filling the remaining slots;
+              // a full candidate pool must not erase a separately signed CDN.
+              const native = previous.filter(raw => !generated.includes(raw));
+              for (const list of [native, generated]) for (const raw of list) if (addresses.size < 8) addresses.add(raw);
+              const next = [...new Set([...generated.filter(raw => addresses.has(raw)), ...addresses])];
               if (previous.length !== next.length || previous.some((raw, index) => raw !== next[index])) { item[backup] = next; changed = true; }
             }
           }

@@ -32,11 +32,13 @@
     }
     if (message?.__bilismoothConfig === 'ready') { if (loaded) push(); else void read(); }
     if (message?.__bilismoothConfig !== 'save') return;
-    revision++;
+    const serial = ++revision;
     writes = writes.catch(() => {}).then(async () => {
       try {
         cached = await authority('patch', message.patch || message.config); loaded = true;
         post({ __bilismoothConfig: 'saved', id: message.id, ok: true });
+        // Unchanged writes have no storage event to complete the startup handshake.
+        if (serial === revision) push();
       } catch {
         post({ __bilismoothConfig: 'saved', id: message.id, ok: false });
       }

@@ -9,7 +9,7 @@
     const Controller = scope.AbortController || root.AbortController;
     const targets = [...new Map((options.targets || []).map(target => [target.host, target])).values()].slice(0, 12);
     async function measure({ host, url: inputUrl }) {
-      const began = now(); let receivedAt = null, bodyAt = null, bytes = 0, status = 0, complete = false, timedOut = false, interrupted = false;
+      const began = now(); let receivedAt = null, bytes = 0, status = 0, complete = false, timedOut = false, interrupted = false;
       let reader = null, timer = null, controller = Controller ? new Controller() : null, release;
       const stopped = new Promise(resolve => { release = resolve; });
       const stop = reason => { if (interrupted) return; interrupted = true; timedOut = reason === 'timeout'; release({ stopped: true }); controller?.abort(); };
@@ -32,7 +32,7 @@
           if (!response.ok) { error = 'http'; try { void response.body?.cancel?.()?.catch?.(() => {}); } catch {} }
           else if (!response.body?.getReader) complete = true;
           else {
-            reader = response.body.getReader(); bodyAt = now();
+            reader = response.body.getReader();
             while (!interrupted) {
               const chunk = await wait(reader.read());
               if (chunk?.stopped || interrupted) break;
@@ -51,9 +51,9 @@
       // A deadline after a partial response remains a slow measured fallback.
       // External cancellation belongs to a discarded round and is never success.
       const usable = bytes > 0 && (!error && complete || timedOut && receivedAt !== null);
-      const elapsedMs = Math.max(0, now() - began), bodyMs = bodyAt === null ? 0 : Math.max(0, now() - bodyAt);
+      const elapsedMs = Math.max(0, now() - began);
       const sample = { host, ttfb: usable ? Math.max(0, receivedAt - began) : null,
-        mbps: usable && bodyMs > 0 ? bytes * 0.008 / bodyMs : 0, ok: !!usable, bytes, elapsedMs,
+        mbps: usable && elapsedMs > 0 ? bytes * 0.008 / elapsedMs : 0, ok: !!usable, bytes, elapsedMs,
         timedOut, status, error: usable ? '' : error || (complete ? 'empty-body' : 'network') };
       try { options.onSample?.(sample); } catch {}
       return sample;

@@ -15,7 +15,7 @@ function emitter(value = {}) {
 function load() {
   const wall = 1800000000000, timers = new Map(), dispatches = [], messages = [];
   let serial = 0;
-  const rankKey = 'bilismooth.routing.rank.v3.America/New_York|en-US';
+  const rankKey = 'bilismooth.routing.rank.v4.America/New_York|en-US';
   const store = new Map([[rankKey, JSON.stringify({ at: wall - 3600000, ranking: [B, A],
     samples: [{ host: B, ok: true, mbps: 64, ttfb: 40, bytes: 786432 }, { host: A, ok: true, mbps: 8, ttfb: 70, bytes: 786432 }] })]]);
   class LocalDate extends Date { static now() { return wall; } }

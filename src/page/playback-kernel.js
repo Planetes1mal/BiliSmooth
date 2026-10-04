@@ -4,7 +4,7 @@
 (function (global) {
   'use strict';
   const instances = new WeakMap();
-  const RANK_PREFIX = 'bilismooth.routing.rank.v3.', FEEDBACK_PREFIX = 'biliSmooth.playback-feedback.v1.';
+  const RANK_PREFIX = 'bilismooth.routing.rank.v4.', FEEDBACK_PREFIX = 'biliSmooth.playback-feedback.v1.';
   const RANK_TTL_MS = 21600000, STALL_GRACE_MS = 2500, STALL_RETRY_MS = 5000;
   const PROBE_TIMEOUT_MS = 4000, PROBE_MAX_HOSTS = 12, PROBE_BYTES = 786432, EVIDENCE_MAX_AGE_MS = 1500;
   const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js') } : {};
@@ -27,7 +27,7 @@
     let watchedVideo = null, watchTimer = null, stallTimer = null, stallDeadlineAt = null, rotateCursor = 0;
     let requestSerial = 0, networkEpoch = 0, feedbackGeneration, recentVideoFailure = null, lastVideoHost = null, lastRecoveryAt = -Infinity;
     let feedback = null, probeEpoch = 0, probeRound = null, probed = false, lastSample = null;
-    const initialGuard = config.p2pGuard, recovery = {avoidHost:null,clearTimer:null}, probeTimings = [];
+    const initialGuard = config.p2pGuard, recovery = {avoidHost:null,clearTimer:null,tried:new Set()}, probeTimings = [];
     const state = {installedAt:new Date(wallNow()).toISOString(),status:'idle',rewriteCount:0,lastSource:'',lastMediaHost:null,
       stalls:0,recoveries:0,p2pBlocked:0,ranking:[],probeSamples:[],probedAt:null,probing:false,probeBytes:0,events:[],needReload:false};
     const active = () => !destroyed && config.enabled && config.mode !== 'off';
@@ -53,6 +53,13 @@
     }
     function requestGeneration() {try{return options.getPlaybackEvidence?.()?.mediaGeneration;}catch{return undefined;}}
     function feedbackRanking(ranking) {return adaptive()&&feedback?feedback.rank(ranking):ranking.slice();}
+    function recoveryCandidates() {
+      const base=state.ranking.length?state.ranking:config.candidatePool;
+      if(!adaptive())return base.slice();
+      const stable=new Set((feedback?.snapshot().rows||[]).filter(row=>row.stableAt>0).map(row=>row.host));
+      const failed=new Set(state.probeSamples.filter(sample=>!sample.ok).map(sample=>sample.host));
+      return feedbackRanking([...new Set([...base,...config.candidatePool])]).filter(host=>!failed.has(host)||stable.has(host));
+    }
     function saveFeedback() {try{root.localStorage?.setItem(feedbackKey(),Reflect.apply(nativeStringify,json,[feedback.snapshot()]));}catch{}}
     function cacheSample(sample) {
       const number=(key,fallback=0)=>Number.isFinite(sample[key])&&sample[key]>=0?sample[key]:fallback;
@@ -116,13 +123,20 @@
       },()=>{if(epoch===probeEpoch){probeRound=null;state.probing=false;}});
     }
     function rotateTarget(stallingHost, reason='waiting') {
-      const base=state.ranking.length?state.ranking:config.candidatePool;
-      const choices=adaptive()?feedbackRanking([...new Set([...base,...config.candidatePool])]):base.slice();
-      if(choices.length<2)return false;
-      if(adaptive())rotateCursor=Math.max(0,choices.indexOf(config.pcdnHost));
+      const choices=recoveryCandidates();
+      if(!choices.length)return false;
       const previous=config.pcdnHost;
-      for(let tried=0;tried<choices.length;tried++){rotateCursor=(rotateCursor+1)%choices.length;const host=choices[rotateCursor];if(host!==previous&&host!==stallingHost){config.pcdnHost=host;break;}}
-      if(config.pcdnHost===previous)return false;
+      let activateCurrent=false;
+      if(adaptive()){
+        // Reconsider the effective ranking from the top: real playback can
+        // promote a working host ahead of the current target between retries.
+        recovery.tried.add(stallingHost||previous);
+        let next=choices.find(host=>!recovery.tried.has(host));
+        if(!next){recovery.tried.clear();recovery.tried.add(previous);if(stallingHost)recovery.tried.add(stallingHost);next=choices.find(host=>!recovery.tried.has(host));}
+        if(next){config.pcdnHost=next;activateCurrent=next===previous&&!!stallingHost&&stallingHost!==previous;}
+      }else for(let tried=0;tried<choices.length;tried++){rotateCursor=(rotateCursor+1)%choices.length;const host=choices[rotateCursor];if(host!==previous&&host!==stallingHost){config.pcdnHost=host;break;}}
+      if(config.pcdnHost===previous&&!activateCurrent)return false;
+      recovery.tried.add(config.pcdnHost);
       policy=core.createPolicy(config);
       lastRecoveryAt=wallNow();recovery.avoidHost=stallingHost||previous;clearLater(recovery.clearTimer);recovery.clearTimer=later(()=>{recovery.avoidHost=null;},15000);
       log('recovery-attempt',{fromHost:stallingHost||previous,toHost:config.pcdnHost,reason});emit({type:'config',config:getConfig()});return true;
@@ -137,7 +151,7 @@
       const evidence = playbackEvidence();
       const generation = evidence?.mediaGeneration ?? requestGeneration();
       if (generation !== feedbackGeneration) {
-        feedback?.resetWindow(); feedbackGeneration = generation; recentVideoFailure = null;
+        feedback?.resetWindow(); feedbackGeneration = generation; recentVideoFailure = null; recovery.tried.clear();
       }
       const request = { id: 'media-' + (++requestSerial), originalUrl: absolute(originalUrl), url: absolute(url), host: hostOf(url),
         transport, method, range, startedAt: now(), kind, networkEpoch,
@@ -247,14 +261,20 @@
     }
     function onPlaying(event){
       const reason=event?.type||'playing';if(['playing','canplay'].includes(reason))log('player-event',{source:reason,...playerContext()});
-      cancelStall(reason);if(state.status==='buffering'){state.status='smooth';log('playback-resumed');}
+      cancelStall(reason);recovery.tried.clear();if(state.status==='buffering'){state.status='smooth';log('playback-resumed');}
     }
     function onSuspend(){log('player-event',{source:'suspend',...playerContext()});}
+    function onWaitInterrupted(event){
+      cancelStall(event.type);
+      // A seek may finish with only the current frame buffered and no second waiting event.
+      if(event.type==='seeked'&&watchedVideo&&!watchedVideo.paused&&!watchedVideo.ended&&watchedVideo.readyState<3)onWaiting(event);
+    }
     function onVisibilityChange(){
       log('player-event',{source:'visibilitychange',...playerContext()});if(document?.hidden){cancelStall('hidden');return;}
       if(watchedVideo&&!watchedVideo.paused&&!watchedVideo.ended&&watchedVideo.readyState<3)onWaiting({type:'visible'});else onPlaying({type:'visible-ready'});
     }
-    const playerHandlers=[['waiting',onWaiting],['stalled',onWaiting],['playing',onPlaying],['canplay',onPlaying],['suspend',onSuspend]];
+    const playerHandlers=[['waiting',onWaiting],['stalled',onWaiting],['playing',onPlaying],['canplay',onPlaying],['suspend',onSuspend],
+      ['pause',onWaitInterrupted],['seeking',onWaitInterrupted],['seeked',onWaitInterrupted],['emptied',onWaitInterrupted]];
     function unwatchVideo(){for(const [name,fn]of playerHandlers)watchedVideo?.removeEventListener?.(name,fn);}
     function watchVideo(){
       if(destroyed)return;const player=options.getPlayer?options.getPlayer():document?.querySelector?.('video');
@@ -267,7 +287,7 @@
     function resetNetwork(){
       networkEpoch++;stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;
       feedback?.clear();saveFeedback();recentVideoFailure=null;lastVideoHost=null;lastRecoveryAt=-Infinity;rotateCursor=0;
-      recovery.avoidHost=null;clearLater(recovery.clearTimer);cancelStall('network-reset');
+      recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);cancelStall('network-reset');
       try{root.localStorage?.removeItem(rankingKey());}catch{}log('network-reset');
       if(lastSample)scheduleProbe(lastSample);if(watchedVideo&&watchedVideo.readyState<3)onWaiting({type:'network-reset'});return getState();
     }
@@ -282,7 +302,7 @@
     }
     function getConfig(){return plainCopy(config);}
     function getFlags(){return {needReload:state.needReload,probing:state.probing};}
-    function getState(){return {...plainCopy(state),config:getConfig(),effectiveRanking:feedbackRanking([...new Set([...state.ranking,...config.candidatePool])]),playbackFeedback:feedback?.snapshot()||null};}
+    function getState(){return {...plainCopy(state),config:getConfig(),effectiveRanking:recoveryCandidates(),playbackFeedback:feedback?.snapshot()||null};}
     function retry(){
       if(!active()||config.selection!=='auto'||!rotateTarget(stallingHost(),'manual'))return false;
       state.recoveries++;
@@ -298,7 +318,7 @@
     instances.set(root,api);
     const Feedback=root.BiliSmoothPlaybackFeedback||global.BiliSmoothPlaybackFeedback;
     if(Feedback){let initial;try{initial=Reflect.apply(nativeParse,json,[root.localStorage?.getItem(feedbackKey())||'null']);}catch{}feedback=Feedback.create({hosts:config.candidatePool,now:wallNow,initial});}
-    const cached=loadRanking();if(cached)applyRanking(cached.ranking);
+    const cached=loadRanking();if(cached){state.probeSamples=cached.samples;state.probedAt=new Date(cached.at).toISOString();applyRanking(cached.ranking);}
     interceptor=RequestLayer.install({scope:root,active,route,prepare,sharingPolicy:initialGuard,
       begin:info=>beginRequest(info.originalUrl,info.url,info.transport,info.method,info.range),onTransfer:reportTransfer,
       ignoreTiming:entry=>probeTimings.some(probe=>probe.url===entry.name&&entry.startTime>=probe.startedAt-3&&entry.startTime<=probe.startedAt+20),

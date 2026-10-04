@@ -119,6 +119,24 @@ test('backup additions retain existing alternatives, deduplicate and obey fixed-
   assert.equal(disabled.changed, false); assert.equal(disabled.value.data.dash.video[0].baseUrl, peer);
 });
 
+test('the full default candidate pool retains native signed fallbacks within the eight-address limit', () => {
+  const native = media('upos-hz-mirrorakam.akamaized.net') + '&sign=native%2Bbackup';
+  const input = { data: { dash: { video: [{ baseUrl: media(A), backupUrl: [media(B), native] }] } } };
+  const routing = policy.createPolicy({});
+  const prepared = routing.prepare(input).value;
+  const backups = prepared.data.dash.video[0].backupUrl;
+  assert.equal(backups.length, 8);
+  assert.equal(new Set(backups).size, 8);
+  assert.equal(backups[0], media(B));
+  assert.ok(backups.includes(native));
+  assert.deepEqual(input.data.dash.video[0].backupUrl, [media(B), native]);
+  assert.equal(routing.prepare(prepared).value, prepared);
+  const ranking = [...settings.candidatePool].reverse();
+  const reranked = routing.prepare(prepared, { ranking }).value.data.dash.video[0].backupUrl;
+  assert.equal(reranked[0], media(ranking[0]));
+  assert.ok(reranked.includes(native));
+});
+
 test('live manifests can remove shared alternatives only when another usable address survives', () => {
   const slow = { host: 'https://node.mcdn.bilivideo.cn:486', extra: '?os=mcdn' };
   const healthy = { host: 'https://d1--cn-gotcha208.bilivideo.com', extra: '?token=PRIVATE' };

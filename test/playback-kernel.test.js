@@ -316,6 +316,28 @@ test('a probe timed out after partial transfer remains ranked as slow with exact
   h.kernel.destroy();
 });
 
+test('probe speed includes first-byte latency so a delayed burst cannot outrank faster completion', async () => {
+  const Probes = require('../src/page/network-probe.js');
+  async function sample(ttfb, bodyMs) {
+    let clock = 0;
+    const result = await Probes.run({ scope: { setTimeout, clearTimeout, AbortController }, now: () => clock,
+      targets: [{ host: A, url: media(A) }], maxBytes: Kernel.constants.PROBE_BYTES,
+      fetch: async () => {
+        clock += ttfb;
+        return { ok: true, status: 200, body: { getReader: () => ({
+          read: async () => { clock += bodyMs; return { done: false, value: new Uint8Array(Kernel.constants.PROBE_BYTES) }; },
+          cancel: async () => {}
+        }) } };
+      } });
+    return result.samples[0];
+  }
+  const fast = await sample(100, 900), delayedBurst = await sample(1900, 100);
+  assert.equal(fast.bytes, delayedBurst.bytes);
+  assert.ok(fast.elapsedMs < delayedBurst.elapsedMs);
+  assert.ok(fast.mbps > delayedBurst.mbps, 'ranking speed must include the wait before bytes arrive');
+  assert.equal(fast.mbps, Kernel.constants.PROBE_BYTES * 0.008 / fast.elapsedMs);
+});
+
 test('disable stops future routing and guards report reload requirements without duplicating interceptors', () => {
   const h = harness(); assert.equal(Kernel.create({ scope: h.scope }), h.kernel);
   h.kernel.setConfig({ enabled: false }); const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', peer);
