@@ -9,9 +9,9 @@
 ```powershell
 npm run build
 npm test
-npm run test:recovery -- --label=recovery-local
-npm run test:compare -- --seconds=70 --label=playback-compare
 ```
+
+仅在改动恢复或请求改写时加跑 `test:recovery`；只有需要判断真实网络播放效果时才运行 `test:compare` 或下述 4K 流程。界面检查按受影响的交互选择，不把所有浏览器矩阵加入日常检查。
 
 每次换一个 `--label`，保留失败证据。报告写入 `outputs/<套件>-<版本>/<label>/`。源码改变后重新构建，浏览器脚本会拒绝测试过期安装目录。
 
@@ -40,14 +40,14 @@ npm run test:compare -- --url=https://www.bilibili.com/video/BV14nYT6mE5N/ --sec
 
 `--url` 可选择当前仍可观看的公开视频；`--seconds` 是每阶段观察时间，范围 15–180 秒，默认 70 秒。关闭优化和开启优化各使用新的临时浏览器配置，每组观察首次打开和刷新后的播放。进入视频前先访问同源 `/robots.txt`，写入与扩展存储一致的真实启动缓存，让 MAIN 脚本首次同步读取时就得到该组的启停设置；准备结果记录在 `runs[].preparation`。未传 `--compare` 时，`test:browser` 只观察开启优化的首次打开和刷新。
 
-测试保留真实 B站响应、浏览器解码和网络速度。视频静音，默认倍速为 1×，可用 `--rate` 指定 0.5–3×；不登录、不替换站点响应、不限制带宽。媒体证据保留 host、路径、Range、状态码及失败原因，去掉带签名的查询参数。
+测试保留真实 B站响应、浏览器解码和网络速度。视频静音，默认倍速为 1×，可用 `--rate` 指定 0.5–3×；默认匿名，不替换站点响应、不限制带宽。需要登录画质时使用下述专用登录流程。媒体证据保留 host、路径、Range、状态码及失败原因，去掉带签名的查询参数。
 
 阅读报告时依次确认：
 
 1. 最终 URL 仍是目标视频。跳转首页、验证页或访问错误都属于环境受阻，不能计作播放成功。
 2. 扩展版本及启停状态符合当前组别；出现实际画帧，且大部分采样处于前台播放状态。
 3. 查看实际媒体 HTTP 状态与失败原因、`candidateDiagnostics` 中的目标与真实供片。播放器可能继续使用已取得的地址；目标切换不等于后续请求已换线。
-4. 结合首帧、可播缓冲、真实画帧停顿和画质看结果。首次加载、暂停、拖动、结束、后台状态不能算成同一类网络卡顿。
+4. 结合首帧、可播缓冲、真实画帧停顿和画质看结果。画帧和媒体事件按主视频元素归属，其他视频的播放不能填补主视频的停顿；播放器元素被替换时重新计时。首次加载、暂停、拖动、结束、后台状态不能算成同一类网络卡顿。暂停、拖动或后台状态结束后重新开始停帧计时，不把此前未出帧的时间计入恢复后的卡顿。
 
 若两组都没有卡顿，结论是“该次条件下都可播放”，不能写“已显著提速”。默认 `bad-only` 模式可能无需重写普通健康 CDN；它观察播放并在适用条件下改写线路。
 
@@ -57,11 +57,29 @@ npm run test:compare -- --url=https://www.bilibili.com/video/BV14nYT6mE5N/ --sec
 
 ## 4K / 2× 实际播放
 
+需要账号权限的画质可以先登录一次，再复用本地登录态：
+
+```powershell
+npm run test:login
+npm run build
+npm run test:4k -- --compare --rate=2 --seconds=70 "--label=4k-$(Get-Date -Format yyyyMMdd-HHmmss)"
+```
+
+`test:login` 打开独立的 Chromium 窗口，由你在 B 站完成扫码或账号登录。它不访问日常浏览器的配置；每约 3 秒检查一次登录状态，最多等待 15 分钟，成功后保存并关闭窗口，手动关闭窗口则取消。登录成功并不代表账号拥有该视频的 4K 权限；测试仍通过原生画质菜单选择，不能获取时如实报告账号或画质限制。
+
+`test:4k` 默认选择 `BV1rp4y1e745`，启用 `--auth --quality=4k --headed`。可用 `--url=https://www.bilibili.com/video/BV.../` 换成你能观看的 4K 视频；不传 `--rate` 时为 1×。测量期间保持测试窗口在前台，尽量不操作播放器或同时下载大文件。脚本会依次打开关闭／开启优化的独立窗口，分别观察首次播放和刷新，每阶段默认 70 秒。使用相同登录态，但初始媒体缓存、扩展排名和站点本地存储互相隔离，避免上一组配置混入下一组。登录测试在开始播放时回到 0 秒，避免账号观看历史恢复到不同片段；该动作记在 `requestedStartTime`。画质可选择但有效播放不足时仍保留刷新观察，只有明确的画质或账号门槛才跳过重复刷新。
+
+后续重复测试只需运行第三条命令，PowerShell 会用当前时间生成新的 `--label`；源码改变时先重新构建。登录过期时脚本会停止该组并提示重新运行 `test:login`，不会悄悄改为匿名测试。需要无窗口运行时，可用 `npm run test:compare -- --auth --quality=4k --rate=2 --seconds=70 --label=signed-in-headless`；报告会记录是否无头运行。
+
+登录态只包含 B 站域的 Cookie，保存在已忽略的 `work/playback-auth/state.json`，**该文件是可复用凭据，不要分享或提交**。专用临时测试配置也位于已忽略的 `work/`。报告不包含 Cookie、整页截图、页面标题或整页文字；浏览器媒体属性仅保留解码相关字段，错误中的 URL 查询参数也会去除。非敏感登录进度写入 `work/playback-auth/status.json`。结束使用后，先关闭测试窗口，再删除 `work/playback-auth/` 及需要清理的 `work/playback-<版本>-*/` 临时配置；这不影响日常浏览器。
+
+无需登录时仍可使用原来的匿名入口：
+
 ```powershell
 npm run test:browser -- --url=https://www.bilibili.com/video/BV1rp4y1e745/ --rate=2 --quality=4k --seconds=70 --label=playback-4k-2x
 ```
 
-需要关闭／开启优化的对照时，把 `test:browser` 换成 `test:compare`，保留其余参数。默认 `--quality=auto` 使用站点选择；`--quality=4k` 会操作原生画质菜单选择 4K，记录菜单不存在、选项锁定和账号要求等具体原因。拿不到所需画质时缩短该阶段并跳过相同条件的刷新，避免重复等待。
+需要关闭／开启优化的对照时，把 `test:browser` 换成 `test:compare`，保留其余参数。默认 `--quality=auto` 使用站点选择；`--quality=4k` 会先确认主视频是否已经实际解码到 4K，否则操作原生画质菜单选择；菜单操作失败后也复核真实尺寸，避免把已在播放的 4K 误判为不可用。选项锁定和账号要求等明确门槛仍如实记录。拿不到所需画质时缩短该阶段并跳过相同条件的刷新，避免重复等待。
 
 判断依据在 `requestedConditions`：需要累计至少 5 秒的有效采样间隔，同时满足前台播放、原生倍速符合请求、实际解码宽或高至少 3840 像素且画帧继续增加。电影比例的 `3840×1920` 可以属于 4K。报告另保留实际媒体请求与 DASH 表示的路径匹配、编码、尺寸和码率；`bandwidthBps` 是清单码率，不是本机下载速度。
 
@@ -75,9 +93,10 @@ npm run test:browser -- --url=https://www.bilibili.com/video/BV1rp4y1e745/ --rat
 
 ```powershell
 npm run test:cdn -- --quality=4k --label=cdn-4k
+npm run test:cdn -- --auth --quality=4k --include-source-hosts --bytes=1048576 "--label=cdn-4k-$(Get-Date -Format yyyyMMdd-HHmmss)"
 ```
 
-命令默认测试当前 9 个自动候选，包括新增的 `upos-sz-mirrorhwb.bilivideo.com`；每个 host 两轮，每次前 2 MiB、6 秒截止，逐一请求并轮换每轮起点。先读取原始媒体作为参考，再比较完整正文和 SHA-256；默认计划流量为 38 MiB。它使用独立匿名 Chromium，从真实页面取得 DASH 地址后进入同源 `/robots.txt` 停止播放器继续取流，执行浏览器 Fetch；不加载扩展。
+命令默认测试当前 9 个自动候选；每个 host 两轮，每次前 2 MiB、6 秒截止，逐一请求并轮换每轮起点。先读取原始媒体作为参考，再比较完整正文和 SHA-256；默认计划流量为 38 MiB，取得视频页面的流量另计。它使用独立 Chromium，默认匿名；`--auth` 复用上述本地登录态并验证登录。从真实页面取得 DASH 地址后进入同源 `/robots.txt` 停止播放器继续取流，执行浏览器 Fetch；不加载扩展，CDN 请求不携带账号 Cookie。
 
 可用参数：
 
@@ -86,12 +105,16 @@ npm run test:cdn -- --quality=4k --label=cdn-4k
 | `--url` | 正常 B 站 BV／av 视频页；默认 `BV1rp4y1e745` |
 | `--quality=4k` | 要求页面实际下发 4K 表示；默认 `highest` 选择已下发的最高尺寸表示 |
 | `--hosts=host1,host2` | 最多 20 个明确的 `upos-` CDN host；省略时用当前自动候选池 |
+| `--auth` | 复用 `test:login` 保存的登录态；必要时通过原生画质菜单取得 4K |
+| `--include-source-hosts` | 加测该媒体表示中原站下发且路径相同的 `upos-` host；不修改默认候选池 |
 | `--rounds=2` | 2 或 3 轮 |
 | `--bytes=2097152` | 每次 65,536–2,097,152 字节；参考与候选总计划流量最多 100 MiB |
 
 报告为 `outputs/cdn-<版本>/<label>/cdn.json`。先看 `source` 的真实尺寸、编码与取得方式，再看 `summary` 的 `verifiedRounds`、`minMbps`、`medianMbps`、错误和完整字节数。`recommendations` 只列出每轮都与原始资源一致的候选；字段表示这次采样结果，不能直接当作全地区默认排名。`bitrateAt2xMbps` 由清单中所选视频和音频码率计算，只表示平均消费需求估算。
 
-该命令正常退出表示采样流程完成，可能仍有候选失败或推荐列表为空。无法取得匿名流、没有所需 4K、参考资源不可读等受阻情况退出码为 2；参数错误等启动异常为 1。真实视频、签名路径和所在地改变后，旧的快慢结果可能失效。新增候选采用一次分片筛选加少数有效节点的播放验证，不循环扩大节点清单。
+测试始终保留参考资源的路径与签名，仅替换 host。因此某 host 返回 403 只说明该资源的 host 替换不兼容，不能据此否定原站提供的另一条独立签名备用地址。
+
+该命令正常退出表示采样流程完成，可能仍有候选失败或推荐列表为空。无法取得媒体流、登录失效、没有所需 4K、参考资源不可读等受阻情况退出码为 2；参数错误等启动异常为 1。真实视频、签名路径和所在地改变后，旧的快慢结果可能失效。新增候选采用一次分片筛选加少数有效节点的播放验证，不循环扩大节点清单。
 
 ## 出现具体故障时再扩大范围
 

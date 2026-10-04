@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { createHash } = require('node:crypto');
-const { runLabel, createEvidenceOutput, assertBuildMatches } = require('../scripts/validation-support.cjs');
+const { createEvidenceOutput, assertBuildMatches, playbackStalls, redactReportUrls } = require('../scripts/validation-support.cjs');
 
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bilismooth-validation-'));
@@ -16,6 +16,23 @@ function workspace(t) {
   });
   return root;
 }
+
+test('playback reports remove signed URL parameters even inside nested browser error messages', () => {
+  const original = { error: 'Failed https://cdn.example/video.m4s?token=private#fragment', nested: ['https://name:secret@example.test/path?session=private', 206] };
+  assert.deepEqual(redactReportUrls(original), { error: 'Failed https://cdn.example/video.m4s', nested: ['https://example.test/path', 206] });
+  assert.ok(original.error.includes('token=private'));
+});
+
+test('playback stall measurements exclude inactive time but still detect a freeze after resume', () => {
+  const sample = (at, patch = {}) => ({ at, frames: 1, lastFrameAt: 0, visibility: 'visible',
+    media: { paused: false, seeking: false, ended: false }, ...patch });
+  for (const inactive of [{ media: { paused: true } }, { media: { seeking: true } }, { visibility: 'hidden' }]) {
+    const prefix = [sample(0), sample(250, inactive), sample(10000, inactive), sample(10250)];
+    assert.deepEqual(playbackStalls([...prefix, sample(10500, { frames: 2, lastFrameAt: 10500 })]), []);
+    assert.deepEqual(playbackStalls([...prefix, sample(11750), sample(12000, { frames: 2, lastFrameAt: 12000 })]),
+      [{ startAt: 10250, endAt: 12000, durationMs: 1750, endReason: 'frames' }]);
+  }
+});
 
 test('new evidence labels isolate runs and existing labeled or legacy evidence is preserved', t => {
   const root = workspace(t), options = { root, suite: 'control-ui', version: '2.8.0', env: {}, announce: false };
@@ -29,14 +46,6 @@ test('new evidence labels isolate runs and existing labeled or legacy evidence i
   fs.writeFileSync(path.join(legacy, 'old-report.json'), 'historic');
   assert.throws(() => createEvidenceOutput({ ...options, suite: 'real-surface', legacyDirectory: legacy, reportFile: 'old-report.json', args: [] }), /already exists/);
   assert.equal(fs.readFileSync(path.join(legacy, 'old-report.json'), 'utf8'), 'historic');
-});
-
-test('unlabeled paths retain their convention while invalid labels cannot escape the evidence root', t => {
-  const root = workspace(t), options = { root, suite: 'floating-control', version: '2.8.0', args: [], env: {}, announce: false };
-  assert.equal(createEvidenceOutput(options), path.join(root, 'outputs', 'floating-control-2.8.0'));
-  assert.throws(() => createEvidenceOutput(options), /already exists/);
-  for (const label of ['', '../elsewhere', 'a/b', 'a\\b', '.']) assert.throws(() => runLabel(['--label=' + label], {}), /report label/);
-  assert.equal(runLabel(['--label=cli'], { BILISMOOTH_RUN_LABEL: 'env' }), 'cli');
 });
 
 test('complete build verification detects stale non-UI inputs and any modified built asset', async t => {

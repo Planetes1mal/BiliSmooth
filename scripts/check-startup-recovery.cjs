@@ -100,7 +100,7 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset) 
     await page.goto(pageUrl);
     await page.waitForFunction(() => window.BiliSmoothSession?.getState().startupReady === true, undefined, { timeout: 10000 });
     await page.evaluate(({ A, B, adaptive }) => {
-      localStorage.setItem('bilismooth.routing.rank.v2.America/New_York|en-US', JSON.stringify({ ranking: [A, B], samples: [], at: Date.now() }));
+      localStorage.setItem(BiliSmoothPlaybackKernel.constants.RANK_PREFIX + 'America/New_York|en-US', JSON.stringify({ ranking: [A, B], samples: [], at: Date.now() }));
       BiliSmoothSession.setConfig({ enabled: true, selection: 'auto', mode: 'force', pcdnHost: A, adaptiveRecovery: adaptive, stallRecovery: true });
     }, { A, B, adaptive });
     await page.click('#start');

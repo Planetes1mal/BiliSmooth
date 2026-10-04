@@ -54,4 +54,46 @@ async function assertBuildMatches(root, buildDirectory = path.join(root, 'dist/e
   return { version: build.version, ...counts };
 }
 
-module.exports = { runLabel, createEvidenceOutput, assertBuildMatches };
+function playbackStalls(samples) {
+  const stalls = [];
+  let activeSince = null, started = null, previousVideoId;
+  for (const sample of samples) {
+    if (sample.videoId !== previousVideoId) {
+      if (started !== null) stalls.push({ startAt: started, endAt: sample.at, durationMs: sample.at - started, endReason: 'player-replaced' });
+      activeSince = null; started = null; previousVideoId = sample.videoId;
+    }
+    const media = sample.media;
+    const active = sample.frames > 0 && sample.visibility === 'visible' && media &&
+      !media.paused && !media.seeking && !media.ended;
+    if (active) activeSince ??= sample.at;
+    else activeSince = null;
+    // A resume starts a new observation window. The last frame can belong to
+    // the time before a pause, seek or hidden tab and must not backdate a stall.
+    const since = active ? Math.max(activeSince, sample.lastFrameAt) : null;
+    const frozen = active && sample.at - since >= 1500;
+    if (frozen && started === null) started = since;
+    if (!frozen && started !== null) {
+      stalls.push({ startAt: started, endAt: sample.at, durationMs: sample.at - started,
+        endReason: media?.paused ? 'pause' : media?.seeking ? 'seek' : sample.visibility !== 'visible' ? 'hidden'
+          : media?.ended ? 'ended' : 'frames' });
+      started = null;
+    }
+  }
+  if (started !== null) {
+    const endAt = samples.at(-1).at;
+    stalls.push({ startAt: started, endAt, durationMs: endAt - started, endReason: 'observation-ended' });
+  }
+  return stalls;
+}
+
+function redactReportUrls(value) {
+  if (typeof value === 'string') return value.replace(/https?:\/\/[^\s"'<>]+/g, raw => {
+    try { const url = new URL(raw); url.search = ''; url.hash = ''; url.username = ''; url.password = ''; return url.href; }
+    catch { return '[redacted-url]'; }
+  });
+  if (Array.isArray(value)) return value.map(redactReportUrls);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactReportUrls(item)]));
+  return value;
+}
+
+module.exports = { runLabel, createEvidenceOutput, assertBuildMatches, playbackStalls, redactReportUrls };

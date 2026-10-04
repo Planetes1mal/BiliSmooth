@@ -189,15 +189,16 @@ async function qualityFixture(context) {
     await dashboard.close();
 
     await page.evaluate(() => BiliSmoothSession.setConfig({ selection: 'auto', mode: 'bad-only' }));
+    const expectedProbes = await page.evaluate(() => Math.min(BiliSmoothSettings.candidatePool.length, BiliSmoothPlaybackKernel.constants.PROBE_MAX_HOSTS));
     holdProbes = true; const beforeProbe = network.length; await page.evaluate(() => BiliSmoothSession.resetNetwork());
-    for (let i = 0; i < 50 && network.slice(beforeProbe).filter(row => row.outcome === 'held-probe').length < 8; i++) await delay(50);
+    for (let i = 0; i < 50 && network.slice(beforeProbe).filter(row => row.outcome === 'held-probe').length < expectedProbes; i++) await delay(50);
     const oldProbes = network.slice(beforeProbe).filter(row => row.outcome === 'held-probe');
     delayMedia = true; await page.evaluate(() => { lifecycle.pending = lifecycle.play('network', { transport: 'fetch' }); });
     for (let i = 0; i < 50 && !network.some(row => row.url.includes('/network/') && row.range && row.outcome === 'delayed-media'); i++) await delay(20);
     await page.evaluate(() => BiliSmoothSession.resetNetwork()); await page.evaluate(() => lifecycle.pending); delayMedia = false;
     const reset = await healthy('network-reset'); phases.oldProbes = oldProbes;
     const mediaRequests = await page.evaluate(() => lifecycle.state.requests.filter(row => row.url.includes('/network/')));
-    check('network reset cancels only old native probe requests while media still completes', oldProbes.length === 8 && oldProbes.every(row => row.failed) && mediaRequests.length === 2 && mediaRequests.every(row => row.outcome === 'complete'), { oldProbes, mediaRequests });
+    check('network reset cancels only old native probe requests while media still completes', oldProbes.length === expectedProbes && oldProbes.every(row => row.failed) && mediaRequests.length === 2 && mediaRequests.every(row => row.outcome === 'complete'), { expectedProbes, oldProbes, mediaRequests });
     check('native media still appends and presents after network reassessment', reset.session.status === 'smooth' && reset.buffered.length > 0, reset);
     holdProbes = false; await page.evaluate(() => BiliSmoothSession.resetNetwork());
 

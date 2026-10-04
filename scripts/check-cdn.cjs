@@ -4,12 +4,13 @@
 const fs = require('node:fs/promises'), path = require('node:path');
 const { chromium } = require('playwright');
 const { createEvidenceOutput } = require('./validation-support.cjs');
+const { loadAuthState, checkLogin } = require('./playback-auth.cjs');
 const settings = require('../src/core/settings.js');
 const { addressForHost } = require('../src/core/routing-policy.js');
 const root = path.resolve(__dirname, '..'), version = require('../package.json').version;
 const args = process.argv.slice(2), option = name => args.find(value => value.startsWith('--' + name + '='))?.slice(name.length + 3);
 if (require.main === module && args.includes('--help')) {
-  console.log('node scripts/check-cdn.cjs --label=unique-run [--url=https://www.bilibili.com/video/BV.../] [--quality=4k] [--hosts=host,host] [--rounds=2] [--bytes=2097152]');
+  console.log('node scripts/check-cdn.cjs --label=unique-run [--auth] [--url=https://www.bilibili.com/video/BV.../] [--quality=4k] [--hosts=host,host] [--include-source-hosts] [--rounds=2] [--bytes=2097152]');
   process.exit(0);
 }
 const target = new URL(option('url') || 'https://www.bilibili.com/video/BV1rp4y1e745/');
@@ -17,22 +18,27 @@ if (target.origin !== 'https://www.bilibili.com' || target.username || target.pa
   throw Error('--url must be a public https://www.bilibili.com/video/BV.../ or /video/av.../ page');
 target.hash = '';
 const hosts = [...new Set((option('hosts') || settings.candidatePool.join(',')).split(',').map(host => host.trim().toLowerCase()))];
-if (!hosts.length || hosts.length > 20 || hosts.some(host => !/^upos-[a-z0-9-]+\.(?:bilivideo\.(?:com|cn|net)|akamaized\.net)$/.test(host)))
+const isUpOsHost = host => /^upos-[a-z0-9-]+\.(?:bilivideo\.(?:com|cn|net)|akamaized\.net)$/.test(host);
+if (!hosts.length || hosts.length > 20 || hosts.some(host => !isUpOsHost(host)))
   throw Error('--hosts must contain 1–20 upos CDN hostnames');
 const rounds = Number(option('rounds') || 2), maxBytes = Number(option('bytes') || 2097152), timeoutMs = 6000;
 const quality = option('quality') || 'highest';
 if (!['highest', '4k'].includes(quality)) throw Error('--quality must be highest or 4k');
 if (!Number.isInteger(rounds) || rounds < 2 || rounds > 3) throw Error('--rounds must be 2 or 3');
 if (!Number.isInteger(maxBytes) || maxBytes < 65536 || maxBytes > 2097152) throw Error('--bytes must be 65536–2097152');
-const plannedBytes = (hosts.length * rounds + 1) * maxBytes;
+const authenticatedRun = args.includes('--auth'), includeSourceHosts = args.includes('--include-source-hosts');
+let plannedBytes = (hosts.length * rounds + 1) * maxBytes;
 if (plannedBytes > 100 * 1048576) throw Error('Planned reference + candidate traffic exceeds 100 MiB; reduce --hosts, --rounds or --bytes');
 const directory = require.main === module ? createEvidenceOutput({ root, suite: 'cdn', version, reportFile: 'cdn.json' }) : null;
 const report = { version, startedAt: new Date().toISOString(), page: target.origin + target.pathname,
+  authentication: { requested: authenticatedRun, status: authenticatedRun ? 'pending' : 'anonymous' },
   method: { isolatedProfile: true, authenticated: false, extensionLoaded: false, nativePageFetch: true,
     requestOrigin: target.origin, credentials: 'omit', cache: 'no-store', range: `bytes=0-${maxBytes - 1}`,
-    rounds, quality, bytesPerRequest: maxBytes, timeoutMs, plannedBytes, sequential: true,
+    rounds, quality, bytesPerRequest: maxBytes, timeoutMs, plannedBytes, includeSourceHosts, sequential: true,
+    candidateAddress: 'Replace only the selected source host, retaining its path and signed query. Native backup URLs with different signatures are not tested independently.',
+    budgetScope: 'Reference and candidate range bodies only; obtaining the real page and its player is additional site traffic.',
     order: 'Rotate the starting host each round; no simultaneous media downloads.',
-    limitation: 'One anonymous accessible representation and one byte range, at this location and time. Manifest bandwidth is an average. Range throughput is not proof of 4K or 2x playback, peak segment demand, or decoding performance.' },
+    limitation: 'One accessible representation and one byte range, at this location and time. Manifest bandwidth is an average. Range throughput is not proof of 4K or 2x playback, peak segment demand, or decoding performance.' },
   samples: [], summary: [], recommendations: [] };
 const finite = value => Number.isFinite(value) ? value : null;
 const median = values => { const sorted = values.filter(Number.isFinite).sort((a, b) => a - b), half = Math.floor(sorted.length / 2);
@@ -49,6 +55,26 @@ function metadata(track) {
   return { id: track.id, width: finite(Number(track.width)), height: finite(Number(track.height)), codecs: track.codecs || null,
     codecId: track.codecid ?? track.codec_id ?? null, fps: track.frame_rate ?? track.frameRate ?? null,
     bandwidth: finite(Number(track.bandwidth)) };
+}
+const is4k = track => Number(track.id) === 120 && Math.max(Number(track.width) || 0, Number(track.height) || 0) >= 3840;
+async function selectNative4k(page) {
+  const result = { action: 'native-quality-menu', clicked: false };
+  try {
+    await page.locator('.bpx-player-container').hover({ timeout: 3000 });
+    const control = page.locator('.bpx-player-ctrl-quality');
+    await control.waitFor({ state: 'visible', timeout: 20000 });
+    await control.hover({ timeout: 3000 });
+    const items = page.locator('.bpx-player-ctrl-quality-menu-item');
+    await items.first().waitFor({ state: 'visible', timeout: 3000 });
+    const option = items.filter({ hasText: /4K|2160P/i }).first();
+    if (!await option.count()) return { ...result, reason: '4k-not-offered' };
+    if (!authenticatedRun && /登录即享|登录解锁|大会员专享/.test(await option.innerText()))
+      return { ...result, reason: 'account-or-membership-required' };
+    if (await option.getAttribute('aria-disabled') === 'true' || /disabled|locked/i.test(await option.getAttribute('class') || ''))
+      return { ...result, reason: '4k-option-locked' };
+    await option.click({ timeout: 3000 });
+    return { ...result, clicked: true };
+  } catch { return { ...result, reason: 'native-quality-control-unavailable' }; }
 }
 async function acquire(page) {
   let observed = [], audio = [], observedFrom = null;
@@ -74,18 +100,43 @@ async function acquire(page) {
     }
     const landed = new URL(page.url());
     report.acquisition.finalPage = landed.origin + landed.pathname;
-    if (!observed.length) throw Object.assign(Error(), { measurementReason: 'no-anonymous-dash-representation' });
+    if (!observed.length) throw Object.assign(Error(), { measurementReason: 'no-accessible-dash-representation' });
+    if (quality === '4k' && !observed.some(is4k)) {
+      report.acquisition.qualitySelection = await selectNative4k(page);
+      if (report.acquisition.qualitySelection.clicked) {
+        // Wait for the site's quality action to supply an authorized representation.
+        // Never synthesize a higher-quality manifest or change its signed media path.
+        const qualityDeadline = Date.now() + 20000;
+        while (!observed.some(is4k) && Date.now() < qualityDeadline) await page.waitForTimeout(250);
+      }
+    }
     observed.sort((a, b) => Number(b.width || 0) * Number(b.height || 0) - Number(a.width || 0) * Number(a.height || 0) || Number(b.bandwidth || 0) - Number(a.bandwidth || 0));
     let available = observed;
     if (quality === '4k') {
-      available = observed.filter(track => Number(track.id) === 120 && (Number(track.width) >= 3840 || Number(track.height) >= 2160));
-      if (!available.length) throw Object.assign(Error(), { measurementReason: '4k-not-offered-to-anonymous-page' });
+      available = observed.filter(is4k);
+      if (!available.length) throw Object.assign(Error(), { measurementReason: report.acquisition.qualitySelection?.reason || '4k-not-offered-to-current-account' });
       available.sort((a, b) => Number(b.bandwidth || 0) - Number(a.bandwidth || 0));
     }
     const chosen = available[0], raw = chosen.baseUrl || chosen.base_url, source = new URL(raw.startsWith('//') ? 'https:' + raw : raw);
     if (!['https:', 'http:'].includes(source.protocol) || source.username || source.password) throw Error('Page supplied an unsupported media address');
     const audioTrack = [...audio].sort((a, b) => Number(b.bandwidth || 0) - Number(a.bandwidth || 0))[0];
+    const sourceHosts = new Set();
+    for (const rawAddress of [raw, ...(chosen.backupUrl || chosen.backup_url || [])]) {
+      try {
+        const address = new URL(rawAddress, source);
+        if (['http:', 'https:'].includes(address.protocol) && !address.username && !address.password &&
+            isUpOsHost(address.hostname) && address.pathname === source.pathname) sourceHosts.add(address.hostname);
+      } catch {}
+    }
+    if (includeSourceHosts) {
+      for (const host of sourceHosts) if (!hosts.includes(host) && hosts.length < 20) hosts.push(host);
+      plannedBytes = (hosts.length * rounds + 1) * maxBytes;
+      if (plannedBytes > 100 * 1048576) throw Object.assign(Error(), { measurementReason: 'source-hosts-exceed-traffic-budget' });
+      report.method.plannedBytes = plannedBytes;
+    }
+    report.method.hosts = [...hosts];
     report.source = { obtainedFrom: observedFrom, host: source.hostname, path: source.pathname,
+      originalUpOsHosts: [...sourceHosts],
       ...metadata(chosen), availableRepresentations: observed.map(metadata),
       audio: audioTrack ? { id: audioTrack.id, codecs: audioTrack.codecs || null, bandwidth: finite(Number(audioTrack.bandwidth)) } : null,
       bitrateAt2xMbps: Number(chosen.bandwidth) > 0 && Number(audioTrack?.bandwidth) > 0 ? (Number(chosen.bandwidth) + Number(audioTrack.bandwidth)) * 2 / 1000000 : null,
@@ -160,12 +211,21 @@ module.exports = { measureInBrowser };
 if (require.main === module) (async () => {
   let browser;
   try {
+    const authState = authenticatedRun ? await loadAuthState(root) : null;
+    if (authenticatedRun && !authState) throw Object.assign(Error(), { measurementReason: 'saved-login-missing-run-test-login' });
     browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--disable-background-networking'] });
     report.browserVersion = browser.version();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } }), page = await context.newPage();
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...(authState ? { storageState: authState } : {}) }), page = await context.newPage();
+    if (authenticatedRun) {
+      await page.goto(target.origin + '/robots.txt', { waitUntil: 'domcontentloaded', timeout: 25000 });
+      const loggedIn = await checkLogin(page);
+      report.authentication.status = loggedIn === true ? 'verified' : loggedIn === false ? 'expired' : 'unverified';
+      if (loggedIn !== true) throw Object.assign(Error(), { measurementReason: loggedIn === false ? 'saved-login-expired-run-test-login' : 'login-check-unavailable' });
+      report.method.authenticated = true;
+    }
     const source = await acquire(page);
     console.log(JSON.stringify({ source: report.source.host, width: report.source.width, height: report.source.height,
-      codec: report.source.codecs, bandwidth: report.source.bandwidth, plannedBytes }));
+      codec: report.source.codecs, bandwidth: report.source.bandwidth, hosts, plannedBytes, authentication: report.authentication.status }));
     report.reference = { host: report.source.host, ...await measure(page, source) };
     if (!report.reference.ok) throw Object.assign(Error(), { measurementReason: 'reference-unusable' });
     for (let round = 0; round < rounds; round++) {
@@ -182,9 +242,10 @@ if (require.main === module) (async () => {
   } catch (error) {
     // Browser errors can include a signed request URL. Keep their type only.
     report.status = 'blocked'; report.failure = { name: error.name, reason: error.measurementReason || null,
-      stage: report.source ? 'measurement' : 'anonymous-playinfo-acquisition' };
+      stage: report.source ? 'measurement' : 'playinfo-acquisition' };
     process.exitCode = 2;
   } finally {
+    report.receivedBytes = (report.reference?.receivedBytes || 0) + report.samples.reduce((sum, sample) => sum + sample.receivedBytes, 0);
     await browser?.close(); report.finishedAt = new Date().toISOString();
     const output = path.join(directory, 'cdn.json'); await fs.writeFile(output, JSON.stringify(report, null, 2) + '\n');
     console.log(JSON.stringify({ report: output, status: report.status, receivedBytes: report.receivedBytes, summary: report.summary }));
