@@ -93,9 +93,16 @@
       if(active()&&prepared.sampleUrl){lastSample=prepared.sampleUrl;scheduleProbe(lastSample);}
       return prepared;
     }
+    function planRoute(raw) {
+      const host=hostOf(raw);
+      const failed=adaptive()&&config.selection==='auto'&&state.probeSamples.some(sample=>sample.host===host&&!sample.ok);
+      const candidates=failed?recoveryCandidates():[];
+      const avoidFailed=failed&&!candidates.includes(host)&&candidates.includes(config.pcdnHost);
+      return (recovery.avoidHost&&host===recovery.avoidHost||avoidFailed?core.createPolicy({...config,mode:'force'}):policy).route(raw);
+    }
     function route(raw) {
       if(!active())return raw;
-      const result=(recovery.avoidHost&&hostOf(raw)===recovery.avoidHost?core.createPolicy({...config,mode:'force'}):policy).route(raw);
+      const result=planRoute(raw);
       if(result.changed)record([result],'segment');return result.url;
     }
     function stopProbes() {probeEpoch++;probeRound?.abort();probeRound=null;state.probing=false;}
@@ -314,7 +321,7 @@
       document?.removeEventListener?.('visibilitychange',onVisibilityChange);interceptor?.destroy();if(initialGuard)state.needReload=true;
       destroyed=true;instances.delete(root);
     }
-    const api={getConfig,setConfig,getFlags,getState,resetNetwork,retry,rewriteUrl:raw=>active()?(recovery.avoidHost&&hostOf(raw)===recovery.avoidHost?core.createPolicy({...config,mode:'force'}):policy).route(raw).url:raw,destroy};
+    const api={getConfig,setConfig,getFlags,getState,resetNetwork,retry,rewriteUrl:raw=>active()?planRoute(raw).url:raw,destroy};
     instances.set(root,api);
     const Feedback=root.BiliSmoothPlaybackFeedback||global.BiliSmoothPlaybackFeedback;
     if(Feedback){let initial;try{initial=Reflect.apply(nativeParse,json,[root.localStorage?.getItem(feedbackKey())||'null']);}catch{}feedback=Feedback.create({hosts:config.candidatePool,now:wallNow,initial});}

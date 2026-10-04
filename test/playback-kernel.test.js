@@ -297,6 +297,23 @@ test('network reset aborts old probe work and late responses cannot overwrite th
   assert.equal(after.probeBytes, before.probeBytes); h.kernel.destroy();
 });
 
+test('automatic native requests avoid zero-byte failed probes while healthy and fixed routes remain unchanged', async () => {
+  const failed = settings.candidatePool[2];
+  const h = harness({ fetch: (input, _init, tools) => new URL(input).hostname === failed
+    ? Promise.reject(new Error('network')) : probeResponse(tools) });
+  h.scope.__playinfo__ = payload(); await h.flush();
+  assert.equal(h.kernel.getState().probeSamples.find(sample => sample.host === failed).ok, false);
+  const native = new h.scope.XMLHttpRequest(); native.open('GET', media(failed)); native.send();
+  assert.equal(new URL(native.openArgs[1]).hostname, h.kernel.getConfig().pcdnHost,
+    'a player-held fallback must use the usable automatic target after a zero-byte probe failure');
+  assert.equal(h.kernel.rewriteUrl(media(B)), media(B), 'healthy native routes remain unchanged');
+  h.kernel.setConfig({ selection: 'fixed', pcdnHost: A });
+  assert.equal(h.kernel.rewriteUrl(media(failed)), media(failed), 'fixed bad-only selection keeps its existing policy');
+  h.kernel.setConfig({ selection: 'auto', enabled: false });
+  assert.equal(h.kernel.rewriteUrl(media(failed)), media(failed));
+  h.kernel.destroy();
+});
+
 test('a probe timed out after partial transfer remains ranked as slow with exact traffic accounting', async () => {
   const h = harness({ fetch: (_input, init) => {
     let read = false;
