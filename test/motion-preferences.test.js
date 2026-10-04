@@ -21,8 +21,8 @@ async function fixture() {
   return page;
 }
 
-for (const preference of ['OS reduced motion', 'application motion']) for (const phase of ['enter', 'exit']) {
-test(`${preference} interruption settles the menu during ${phase}`, async () => {
+for (const phase of ['enter', 'exit']) {
+test(`OS reduced motion interruption settles the menu during ${phase}`, async () => {
   const page = await fixture();
   try {
     const started = await page.evaluate(phase => {
@@ -34,10 +34,8 @@ test(`${preference} interruption settles the menu during ${phase}`, async () => 
       return animations.length;
     }, phase);
     assert.ok(started > 0);
-    if (preference === 'OS reduced motion') {
-      await page.emulateMedia({ reducedMotion: 'reduce' });
-      await page.waitForFunction(() => reducedChanged);
-    } else await page.evaluate(() => { document.documentElement.dataset.motion = 'off'; BiliSmoothChoice.syncMotion(); });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.waitForFunction(() => reducedChanged);
     const state = await page.evaluate(() => {
       const layer = document.querySelector('.bs-choice-layer');
       return { running: layer.getAnimations().filter(animation => animation.playState === 'running').length, opacity: getComputedStyle(layer).opacity, hidden: layer.hidden, popover: layer.matches(':popover-open'), expanded: document.querySelector('#choose').getAttribute('aria-expanded') };

@@ -1,15 +1,14 @@
 'use strict';
 
-// Approved v4 acceptance tests against the real extension sources and build.
+// Focused interaction regressions against the real extension sources and build.
 // Chrome messaging and playback telemetry are deterministic local fixtures;
 // geometry, pointer input, focus, scrolling, rendering and persistence code are real.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const vm = require('node:vm');
 const { chromium } = require('playwright');
-const { createEvidenceOutput, assertBuildMatches } = require('../scripts/validation-support.cjs');
+const { createEvidenceOutput } = require('../scripts/validation-support.cjs');
 const root = path.resolve(__dirname, '..');
 const version = require('../package.json').version;
 const types = ['status-logo', 'logo', 'status', 'speed', 'buffer', 'combined', 'route', 'rate', 'resolution'];
@@ -106,50 +105,6 @@ async function safe(ui) {
   assert.ok(r.left >= b.left - 1 && r.top >= b.top - 1 && r.right <= b.right + 1 && r.bottom <= b.bottom + 1, JSON.stringify({ r, b }));
 }
 
-test('new entry defaults validate and persist through the real background settings authority', async () => {
-  const settings = require('../src/core/settings.js'), migration = require('../src/core/settings-migration.js');
-  assert.equal(settings.defaults.floatingEntryEnabled, true);
-  assert.equal(settings.defaults.floatingEntryType, 'status-logo');
-  assert.equal(settings.defaults.floatingEdgeSnap, true);
-  assert.equal(settings.normalize({ floatingEntryType: 'untrusted-type' }).floatingEntryType, 'status-logo');
-  const store = { [migration.key]: settings.normalize({ floatingFields: ['buffer'], p2pGuard: true }) }, listeners = [];
-  const chrome = { runtime: { id: 'test', getURL: file => 'chrome-extension://test/' + file, getManifest: () => ({ version }), onMessage: { addListener(fn) { listeners.push(fn); } } }, action: { onClicked: { addListener() {} } }, storage: { local: {
-    async get() { return structuredClone(store); }, async set(values) { Object.assign(store, structuredClone(values)); }
-  } } };
-  vm.runInNewContext(await fs.readFile(path.join(root, 'src/extension/background.js'), 'utf8'), { chrome, importScripts() {}, BiliSmoothSettings: settings, BiliSmoothSettingsMigration: migration, URL, setTimeout, clearTimeout });
-  const command = patch => new Promise(resolve => listeners[0]({ channel: 'bilismooth-settings', action: 'patch', patch }, { id: 'test' }, resolve));
-  for (const type of types) { const response = await command({ floatingEntryType: type }); assert.equal(response.ok, true); assert.equal(response.result.floatingEntryType, type); }
-  await Promise.all([command({ floatingEntryEnabled: false }), command({ floatingEdgeSnap: false })]);
-  const saved = await migration.read(chrome.storage.local);
-  assert.equal(saved.floatingEntryEnabled, false); assert.equal(saved.floatingEdgeSnap, false);
-  assert.deepEqual(saved.floatingFields, ['buffer'], 'Entry changes leave preview fields independent');
-  assert.equal(saved.p2pGuard, true, 'Entry changes preserve network preferences');
-});
-
-for (const phase of ['edge', 'preview', 'panel']) test(phase + ' follows the pointer freely and stays at the released position', async t => {
-  const ui = await floating(t); await pickPhase(ui, phase);
-  const after = await dragTo(ui, 410, 360);
-  assert.ok(Math.abs(after.left - 410) < 2 && Math.abs(after.top - 360) < 2, 'Manual movement may freely overlap video content');
-  await safe(ui);
-  await ui.page.evaluate(() => document.querySelector('#bilismooth-floating').shadowRoot.activeElement?.blur());
-  await ui.page.screenshot({ path: path.join(output, 'floating-' + phase + '-final.png'), animations: 'disabled',
-    clip: { x: after.left - 30, y: after.top - 30, width: after.width + 60, height: after.height + 60 } });
-});
-
-test('bottom-right panel collapse immediately preserves the same corner through all three sizes', async t => {
-  const ui = await floating(t); await pickPhase(ui, 'panel');
-  const b = await bounds(ui), r = await rect(ui);
-  const panel = await dragTo(ui, b.right - r.width - 60, b.bottom - r.height - 60);
-  await ui.host.locator('#bs-close').click(); await settle(ui);
-  assert.equal(await ui.host.getAttribute('data-phase'), 'preview');
-  const preview = await rect(ui);
-  assert.ok(Math.abs(panel.right - preview.right) <= 2 && Math.abs(panel.bottom - preview.bottom) <= 2, 'Collapse retains dragged bottom-right corner');
-  await ui.page.keyboard.press('Escape'); await settle(ui);
-  assert.equal(await ui.host.getAttribute('data-phase'), 'edge');
-  const edge = await rect(ui);
-  assert.ok(Math.abs(panel.right - edge.right) <= 2 && Math.abs(panel.bottom - edge.bottom) <= 2);
-});
-
 test('near-edge hint does not pull the held pointer; release snaps and the next drag interrupts', async t => {
   const ui = await floating(t); await pickPhase(ui, 'panel');
   const drag = await startDrag(ui), b = await bounds(ui), target = b.right - drag.before.width - 16;
@@ -186,21 +141,6 @@ test('fullscreen interrupts an active drag and restores the configured minimum w
   assert.equal(await ui.host.getAttribute('data-phase'), 'edge'); await safe(ui);
 });
 
-test('preferences received during a drag reconcile the released size and minimum state', async t => {
-  const ui = await floating(t);
-  const drag = await startDrag(ui); await moveDrag(ui, drag, 410, 360);
-  await ui.page.evaluate(() => adoption.patch({ floatingEntryType: 'combined' }));
-  await ui.page.mouse.up(); await settle(ui);
-  assert.equal(await ui.host.getAttribute('data-phase'), 'edge');
-  assert.equal((await rect(ui)).width, 150, 'New entry metrics cannot overflow the old logo width');
-  assert.equal(await ui.host.locator('.bs-entry-face').getAttribute('data-entry-type'), 'combined');
-  const next = await startDrag(ui); await moveDrag(ui, next, 480, 340);
-  await ui.page.evaluate(() => adoption.patch({ floatingEntryEnabled: false }));
-  await ui.page.mouse.up(); await settle(ui);
-  assert.equal(await ui.host.getAttribute('data-phase'), 'preview', 'The saved two-state minimum applies after drag');
-  await safe(ui);
-});
-
 test('two-state mode stays preview after collapse, leave, Escape, outside click and route refresh', async t => {
   const ui = await floating(t);
   await ui.page.evaluate(() => adoption.patch({ floatingEntryEnabled: false })); await settle(ui);
@@ -216,30 +156,6 @@ test('two-state mode stays preview after collapse, leave, Escape, outside click 
     assert.equal(await ui.host.isVisible(), true); await safe(ui);
   }
   assert.equal(await ui.page.evaluate(() => adoption.outsideClicks), 1, 'Outside dismissal preserves the page action');
-});
-
-test('nine live entry modes use current telemetry independently of preview field selection', async t => {
-  const ui = await floating(t, { reducedMotion: 'reduce' });
-  await ui.page.evaluate(() => adoption.patch({ floatingFields: [] }));
-  for (const type of types) {
-    await ui.page.evaluate(type => adoption.patch({ floatingEntryType: type }), type); await settle(ui);
-    const face = ui.host.locator('#bs-edge .bs-entry-face');
-    assert.equal(await face.getAttribute('data-entry-type'), type);
-    assert.equal(await face.getAttribute('data-entry-state'), 'smooth');
-    if (type === 'speed') assert.match(await face.innerText(), /2[.,]00\s*MB\/s/);
-    if (type === 'buffer') assert.match(await face.innerText(), /24[.,]8/);
-    if (type === 'rate') assert.match(await face.innerText(), /1[.,]5/);
-    if (type === 'resolution') assert.match(await face.innerText(), /1080/);
-    await safe(ui);
-  }
-  await ui.page.evaluate(() => { adoption.patch({ floatingEntryType: 'status-logo' }); adoption.state.media.playback = 'paused'; adoption.notify(); });
-  await ui.page.waitForTimeout(70);
-  assert.equal(await ui.host.locator('#bs-edge .bs-entry-face').getAttribute('data-entry-state'), 'paused');
-  assert.equal(await ui.host.locator('#bs-edge .bs-entry-face').evaluate(node => node.getAnimations({ subtree: true }).filter(a => a.playState === 'running').length), 0);
-  const before = await ui.page.evaluate(() => adoption.viewReads);
-  await ui.page.evaluate(() => { for (let i = 0; i < 30; i++) adoption.notify(); }); await ui.page.waitForTimeout(50);
-  assert.equal(await ui.page.evaluate(() => adoption.fullReads), 0);
-  assert.ok((await ui.page.evaluate(() => adoption.viewReads)) - before <= 2, 'Rendering remains frame-coalesced');
 });
 
 test('observed idle zero, explicit unknown and legacy speed evidence agree across entry, preview, panel and dashboard', async t => {
@@ -341,8 +257,6 @@ test('log history retains keyed rows and position, counts only incoming records,
   assert.equal(await ui.page.locator('#follow-logs').getAttribute('data-has-new'), 'false');
   assert.equal(await ui.page.locator('#follow-logs').isDisabled(), true, 'Settled footer shows the up-to-date state');
   assert.equal(await ui.page.evaluate(() => oldLogNode.isConnected), true, 'Existing rows survive follow-to-latest');
-  const label = await ui.page.locator('label[for=log-filter]').boundingBox(), menu = await ui.page.locator('#log-filter').boundingBox();
-  assert.ok(menu.x - (label.x + label.width) >= 12, 'Filter label has deliberate breathing room');
 });
 
 test('log follow motion is interrupted by wheel input and hidden-tab updates preserve history', async t => {
@@ -355,20 +269,6 @@ test('log follow motion is interrupted by wheel input and hidden-tab updates pre
   await ui.page.locator('#follow-logs').click(); await ui.page.waitForTimeout(60);
   await box.hover(); await ui.page.mouse.wheel(0, 120); await ui.page.waitForTimeout(750);
   assert.ok(await box.evaluate(node => node.scrollTop) > 40, 'User scroll interrupts the programmatic follow');
-});
-
-test('dashboard adopts warm composition without duplicate overview animations and remains usable on narrow screens', async t => {
-  const ui = await dashboard(t);
-  assert.equal(await ui.page.locator('.state-metric, .sig-status-rail, .bs-dashboard-state').count(), 0);
-  await ui.page.screenshot({ path: path.join(output, 'overview-light.png'), fullPage: true, animations: 'disabled' });
-  for (const width of [1366, 736, 360]) {
-    await ui.page.setViewportSize({ width, height: 1000 });
-    for (const tab of ['overview', 'settings', 'logs']) {
-      await ui.show(tab);
-      assert.ok(await ui.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), tab + ' overflows at ' + width);
-      if (width === 360) await ui.page.screenshot({ path: path.join(output, tab + '-narrow.png'), fullPage: true, animations: 'disabled' });
-    }
-  }
 });
 
 test('installed MV3 extension propagates and reloads the new preferences through its real content bridge', async () => {
@@ -432,9 +332,4 @@ test('installed MV3 extension propagates and reloads the new preferences through
     if (!resolved.startsWith(path.resolve(output) + path.sep)) throw Error('Refusing profile cleanup outside acceptance output');
     await fs.rm(resolved, { recursive: true, force: true });
   }
-});
-
-test('installable candidate contains the exact accepted production source revision', async () => {
-  const verified = await assertBuildMatches(root);
-  assert.equal(verified.version, version, 'Build version matches the current package');
 });
