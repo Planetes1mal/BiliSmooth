@@ -99,7 +99,14 @@
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const shortHost = value => value ? String(value).replace(/^upos-(?:sz-|hz-)?(?:mirror)?/, '').replace(/\.(?:bilivideo\.(?:com|cn|net)|akamaized\.net)$/, '').toUpperCase() : t('unknown');
   const snapshot = () => typeof runtime.getViewState === 'function' ? runtime.getViewState() : runtime.getState();
-  const routeKey = () => /^(?:www\.)?bilibili\.com$/i.test(scope.location.hostname) && /^\/(?:video\/(?:BV[a-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+)\/?$/i.test(scope.location.pathname) ? scope.location.pathname : '';
+  const routeKey = () => {
+    if (!/^(?:www\.)?bilibili\.com$/i.test(scope.location.hostname)) return '';
+    const path = scope.location.pathname;
+    if (/^\/(?:video\/(?:BV[a-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+)\/?$/i.test(path)) return path;
+    if (!/^\/list\/(?:watchlater|ml\d+)\/?$/i.test(path)) return '';
+    const query = new URL(scope.location.href).searchParams, video = query.get('bvid') || query.get('oid');
+    return video ? path + '?' + video : '';
+  };
   function listen(target, name, callback, options) {
     target.addEventListener(name, callback, options);
     cleanups.push(() => target.removeEventListener(name, callback, options));

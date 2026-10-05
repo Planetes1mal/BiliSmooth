@@ -426,6 +426,11 @@
     try {
       const value = new URL(scope.location.href);
       if (value.protocol === 'https:' && /(^|\.)bilibili\.com$/.test(value.hostname) && /^\/(?:video\/(?:BV|av)[\w]+|bangumi\/play\/(?:ep|ss)\d+)(?:\/|$)/i.test(value.pathname)) url = value.origin + value.pathname;
+      else if (value.protocol === 'https:' && /^(?:www\.)?bilibili\.com$/i.test(value.hostname) && /^\/list\/(?:watchlater|ml\d+)\/?$/i.test(value.pathname)) {
+        const bvid = value.searchParams.get('bvid'), oid = value.searchParams.get('oid');
+        const id = /^BV[a-z0-9]+$/i.test(bvid || '') ? bvid : /^\d+$/.test(oid || '') ? 'av' + oid : '';
+        if (id) url = value.origin + '/video/' + id + '/';
+      }
     } catch {}
     const title = String(document.title || '').replace(/[_\s-]*(?:哔哩哔哩[_\s-]*)?bilibili\s*$/i, '').trim().slice(0, 240);
     if (url !== videoMeta.url) {

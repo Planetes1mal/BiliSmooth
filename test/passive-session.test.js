@@ -111,6 +111,12 @@ test('current-video metadata clears immediately on route change and waits for th
   h.document.querySelector = () => ({ content: 'https://i0.hdslb.com/bfs/archive/next.jpg' }); h.advance(1000);
   assert.equal(h.api.getViewState().videoMeta.title, '下一段'); assert.equal(h.api.getViewState().videoMeta.url, 'https://www.bilibili.com/video/BVnext/');
   assert.equal(h.api.getViewState().videoMeta.coverUrl, 'https://i0.hdslb.com/bfs/archive/next.jpg');
+  for (const list of ['watchlater', 'ml123']) {
+    h.scope.location.href = `https://www.bilibili.com/list/${list}?bvid=BV${list}&oid=123&tracking=private`;
+    h.document.title = `${list}_哔哩哔哩_bilibili`; h.advance(1000);
+    assert.equal(h.api.getViewState().videoMeta.url, `https://www.bilibili.com/video/BV${list}/`);
+    assert.equal(h.api.getViewState().videoMeta.title, list);
+  }
 });
 test('synchronous namespace config reaches kernel before storage handshake and does not overwrite storage on install', () => {
   const h = harness({ storage: { 'bilismooth.startup.v4': JSON.stringify({ enabled: false, pcdnHost: B, mcdnStrategy: 'replace', p2pGuard: true }) } });
