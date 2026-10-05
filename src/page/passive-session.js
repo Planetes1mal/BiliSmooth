@@ -389,6 +389,9 @@
     const block = document.getElementById?.('big-block-panel'), bounds = block?.getBoundingClientRect();
     if (bounds?.width > 0 && bounds.height > 0 && /所在的地区无法观看|限定中国大陆地区播放/.test(block.textContent || ''))
       return { reason: 'region' };
+    const video = scope.__INITIAL_STATE__?.videoData;
+    if ((!player || !player.readyState) && video?.is_upower_exclusive === true &&
+      video.is_upower_play === false && video.is_upower_preview === false) return { reason: 'payment' };
     const error = scope.__INITIAL_STATE__?.error;
     return (!player || !player.readyState) && (error?.trueCode === -404 || error?.code === 404)
       ? { reason: 'unavailable', code: -404 } : null;

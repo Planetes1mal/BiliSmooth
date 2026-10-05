@@ -61,12 +61,13 @@ test('compact snapshot reads cached observations without scanning players or con
 });
 
 test('site gates block manual recovery while preserving shared settings and automatic network resets', () => {
-  for (const reason of ['region', 'unavailable']) {
+  for (const reason of ['region', 'unavailable', 'payment']) {
     const h = harness({ noPlayer: true, connection: { type: 'wifi' } });
     const block = { textContent: '非常抱歉，根据版权方要求 您所在的地区无法观看本片',
       getBoundingClientRect: () => ({ width: 810, height: 502 }) };
     h.document.getElementById = id => reason === 'region' && id === 'big-block-panel' ? block : null;
-    h.scope.__INITIAL_STATE__ = reason === 'unavailable' ? { error: { code: 404, trueCode: -404, message: '啥都木有' } } : {};
+    h.scope.__INITIAL_STATE__ = reason === 'unavailable' ? { error: { code: 404, trueCode: -404, message: '啥都木有' } }
+      : reason === 'payment' ? { videoData: { is_upower_exclusive: true, is_upower_play: false, is_upower_preview: false } } : {};
     h.advance(1000);
     assert.equal(h.api.getViewState().availability?.reason, reason);
     assert.equal(h.api.getState().media.playback, 'error');

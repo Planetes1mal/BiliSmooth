@@ -163,6 +163,9 @@
   const format = Object.freeze({
     availability(value, lang) {
       if (!value) return null;
+      if (value.reason === 'payment') return lang === 'en'
+        ? { title: 'Payment required', copy: 'The site requires payment to watch this video. Changing CDN routes cannot remove that requirement.' }
+        : { title: '需要付费观看', copy: '站点要求付费后观看此视频，切换线路无法解除该限制。' };
       const region = value.reason === 'region', english = lang === 'en';
       return { title: english ? region ? 'Region restriction' : 'Video unavailable' : region ? '站点地区限制' : '视频不可用',
         copy: english ? region ? 'The site withheld playback addresses for your region. Changing CDN routes cannot resolve this.'
