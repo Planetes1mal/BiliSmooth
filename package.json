@@ -22,7 +22,7 @@
     "prepare": "npm run build",
     "test:theme": "node scripts/check-theme-readability.cjs",
     "test:motion": "node --test test/motion-preferences.test.js test/floating-hover.test.js",
-    "test:tooling": "node --test test/validation-support.test.js",
+    "test:tooling": "node --test test/validation-support.test.js test/benchmark-playback.test.js",
     "package": "node scripts/package.mjs",
     "verify:package": "python scripts/verify-package.py",
     "test:workflow": "node --test test/commit-workflow.test.js test/release-workflow.test.js",
@@ -34,7 +34,8 @@
     "store:prepare": "node scripts/prepare-store.mjs",
     "store:capture": "node scripts/capture-store.cjs",
     "demo:record": "node scripts/capture-demo-video.cjs",
-    "store:artwork": "node scripts/make-store-promo.cjs"
+    "store:artwork": "node scripts/make-store-promo.cjs",
+    "benchmark": "node scripts/benchmark-playback.cjs"
   },
   "keywords": [
     "bilibili",

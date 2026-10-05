@@ -24,7 +24,14 @@ https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
 
 ## 安装
 
-适用于桌面版 Chrome 和 Edge。Chrome 需要版本 120 或更新。目前通过 GitHub 下载，尚未在 Chrome 应用商店上架。
+适用于桌面版 Chrome 和 Edge。Chrome 需要版本 120 或更新。
+
+### Chrome 应用商店
+
+1. 打开 [Chrome 应用商店](https://chromewebstore.google.com/detail/obhciaoeldnglalhhkmopkdolkonipfd)，点击 **添加至 Chrome**。
+2. 刷新 B 站视频页，即可看到浮窗。点击浏览器工具栏中的扩展图标，可以打开仪表盘。
+
+### GitHub ZIP 手动安装
 
 1. 打开 [最新 Release](https://github.com/Planetes1mal/BiliSmooth/releases/latest)，下载 `BiliSmooth-<版本号>.zip` 并解压。
 2. 在地址栏打开 `chrome://extensions`；Edge 使用 `edge://extensions`。

@@ -24,7 +24,14 @@ https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
 
 ## Install
 
-For desktop Chrome and Edge. Chrome requires version 120 or later. Downloads are currently available through GitHub; BiliSmooth is not yet listed in the Chrome Web Store.
+For desktop Chrome and Edge. Chrome requires version 120 or later.
+
+### Chrome Web Store
+
+1. Open the [Chrome Web Store](https://chromewebstore.google.com/detail/obhciaoeldnglalhhkmopkdolkonipfd) and click **Add to Chrome**.
+2. Refresh your Bilibili video page to load the floating panel. Click the extension's browser toolbar icon to open the dashboard.
+
+### Manual installation from a GitHub ZIP
 
 1. Open the [latest release](https://github.com/Planetes1mal/BiliSmooth/releases/latest), download `BiliSmooth-<version>.zip`, and extract it.
 2. Open `chrome://extensions`, or `edge://extensions` in Edge.
