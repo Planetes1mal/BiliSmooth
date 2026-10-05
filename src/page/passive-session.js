@@ -311,7 +311,7 @@
       mediaGeneration, startupPending: startupPending() }) });
   configuring = false;
   function resetNetwork(reason = 'manual') {
-    refresh(); if (availability) return false;
+    refresh(); if (availability && reason === 'manual') return false;
     networkTransport = connectionType();
     networkEpoch++; resetSpeed();
     // In-flight observations and the current media catalog survive network re-evaluation.
@@ -509,7 +509,7 @@
   function clearLogs() { events = []; criticalEvents = []; observations = []; episodes = []; droppedEvents = droppedCriticalEvents = droppedObservations = 0; }
   const api = {
     getState: state, getViewState: viewState, getConfig: () => clone(config), setConfig: save, flushSettings,
-    applyRoute(host) { refresh(); if (availability || !settings.isCdnHost(host)) return false; save({ enabled: true, selection: 'fixed', pcdnHost: host, mode: config.mode === 'off' ? 'bad-only' : config.mode }); return true; },
+    applyRoute(host) { if (!settings.isCdnHost(host)) return false; save({ enabled: true, selection: 'fixed', pcdnHost: host, mode: config.mode === 'off' ? 'bad-only' : config.mode }); return true; },
     retry() { refresh(); if (availability) return false; const result = kernel.retry(); notify(); return result !== false; }, resetNetwork,
     boost() { refresh(); if (availability) return false; save({ enabled: true, mode: 'force' }); return true; },
     reload() { persist(); return true; },

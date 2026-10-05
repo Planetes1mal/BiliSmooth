@@ -60,9 +60,9 @@ test('compact snapshot reads cached observations without scanning players or con
   assert.equal(h.api.getViewState().needReload, true); assert.equal(h.api.getViewState().probing, true);
 });
 
-test('site region and missing-video gates expose unavailable playback and reject route actions', () => {
+test('site gates block manual recovery while preserving shared settings and automatic network resets', () => {
   for (const reason of ['region', 'unavailable']) {
-    const h = harness({ noPlayer: true });
+    const h = harness({ noPlayer: true, connection: { type: 'wifi' } });
     const block = { textContent: '非常抱歉，根据版权方要求 您所在的地区无法观看本片',
       getBoundingClientRect: () => ({ width: 810, height: 502 }) };
     h.document.getElementById = id => reason === 'region' && id === 'big-block-panel' ? block : null;
@@ -70,11 +70,15 @@ test('site region and missing-video gates expose unavailable playback and reject
     h.advance(1000);
     assert.equal(h.api.getViewState().availability?.reason, reason);
     assert.equal(h.api.getState().media.playback, 'error');
-    assert.equal(h.api.applyRoute(B), false);
+    assert.equal(h.api.applyRoute(B), true, 'route selection saves a shared preference even when this source is gated');
+    assert.equal(h.api.getConfig().pcdnHost, B);
     assert.equal(h.api.retry(), false);
     assert.equal(h.api.resetNetwork(), false);
     assert.equal(h.api.boost(), false);
-    assert.deepEqual(h.calls, [], 'a site refusal supplies no address to probe or recover');
+    assert.deepEqual(h.calls, ['config'], 'manual playback actions stay blocked without preventing settings saves');
+    h.scope.emit('online');
+    h.scope.navigator.connection.type = 'cellular'; h.scope.navigator.connection.emit('change');
+    assert.deepEqual(h.calls, ['config', 'reset', 'reset'], 'real network changes still invalidate old network evidence');
     h.document.getElementById = () => null; h.scope.__INITIAL_STATE__ = {};
     h.advance(1000);
     assert.equal(h.api.getViewState().availability, null, 'the site gate must clear when it disappears');
