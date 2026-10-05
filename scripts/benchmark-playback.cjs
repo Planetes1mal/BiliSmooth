@@ -200,6 +200,14 @@ function qualitySettled(quality, selectedQualityId) {
     : quality.nowQ === selectedQualityId && quality.realQ === selectedQualityId;
 }
 
+function qualityPrepared(sample, selection, representations, requests) {
+  return qualityLabelMatches(sample.quality, selection.selectedLabel) &&
+    qualitySettled(sample.nativeQuality, selection.selectedQualityId) && sample.media?.readyState >= 1 &&
+    representations.some(row => row.kind === 'video' && row.quality === selection.selectedQualityId &&
+      row.width === sample.media.width && row.height === sample.media.height &&
+      requests.some(request => request.role === 'playback' && request.bytes > 0 && row.paths.includes(request.resourcePath)));
+}
+
 function segmentJumps(samples) {
   const jumps = [];
   for (let index = 1; index < samples.length; index++) {
@@ -505,11 +513,9 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
         const latestVideoRequest = [...run.requests].reverse().find(request => request.role === 'playback' && request.bytes > 0 &&
           run.dashRepresentations.some(row => row.kind === 'video' && row.paths.includes(request.resourcePath)));
         const latestQuality = run.dashRepresentations.find(row => row.kind === 'video' && row.paths.includes(latestVideoRequest?.resourcePath))?.quality;
-        dimensionsReady = qualityLabelMatches(sample.quality, run.qualitySelection.selectedLabel) &&
-          qualitySettled(sample.nativeQuality, run.qualitySelection.selectedQualityId) && sample.media?.readyState >= 1 &&
-          latestQuality === run.qualitySelection.selectedQualityId &&
-          run.dashRepresentations.some(row => row.kind === 'video' &&
-          row.quality === run.qualitySelection.selectedQualityId && row.width === sample.media.width && row.height === sample.media.height);
+        // A completed quality switch can reuse buffered target data. An older
+        // request for the temporary lower quality does not identify the decoder.
+        dimensionsReady = qualityPrepared(sample, run.qualitySelection, run.dashRepresentations, run.requests);
         run.qualityPreparation.observations.push({ at: sample.at, label: sample.quality, latestDeliveredQualityId: latestQuality ?? null,
           nativeQuality: sample.nativeQuality, width: sample.media?.width, height: sample.media?.height });
         if (dimensionsReady) stableSince ??= Date.now();
@@ -689,5 +695,5 @@ async function main(argv = process.argv.slice(2)) {
 }
 
 module.exports = { options, normalizeVideos, makeSchedule, rangeLength, isProbe, createNetworkTracker, recordDash, summarizeRun,
-  qualityLabelMatches, beginConditionedPlayback, prepareNativeStart, matchesDefaultRuntime, qualitySettled, segmentJumps, requestNativeQuality };
+  qualityLabelMatches, beginConditionedPlayback, prepareNativeStart, matchesDefaultRuntime, qualitySettled, qualityPrepared, segmentJumps, requestNativeQuality };
 if (require.main === module) main().catch(error => { console.error(redactReportUrls(String(error))); process.exitCode = 1; });

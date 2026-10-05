@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const vm = require('node:vm');
 const { makeSchedule, normalizeVideos, createNetworkTracker, summarizeRun, beginConditionedPlayback, prepareNativeStart, matchesDefaultRuntime,
-  qualitySettled, segmentJumps, requestNativeQuality } = require('../scripts/benchmark-playback.cjs');
+  qualitySettled, qualityPrepared, segmentJumps, requestNativeQuality } = require('../scripts/benchmark-playback.cjs');
 
 test('benchmark interleaves arms, rotates repetitions, and screens each candidate once', () => {
   const videos = normalizeVideos([{ id: 'BVstutter', set: 'stutter' }, { id: 'BVcontrol', set: 'control' }], 'measure');
@@ -27,6 +27,21 @@ test('native quality preparation distinguishes pending Auto from settled Auto an
   assert.equal(qualitySettled({ nowQ: 0, newQ: 0, realQ: 112 }), true);
   assert.equal(qualitySettled({ nowQ: 0, newQ: 0, realQ: 80 }, 80), false);
   assert.equal(qualitySettled({ nowQ: 80, newQ: 80, realQ: 80 }, 80), true);
+});
+
+test('buffered target 80 remains ready when an older quality-64 request is last in the request list', () => {
+  const selection = { selectedQualityId: 80, selectedLabel: '1080P 高清' };
+  const sample = { quality: '1080P 高清', nativeQuality: { nowQ: 80, newQ: 80, realQ: 80 },
+    media: { readyState: 4, width: 1080, height: 1920 } };
+  const representations = [{ kind: 'video', quality: 80, width: 1080, height: 1920, paths: ['/video-30080.m4s'] },
+    { kind: 'video', quality: 64, width: 720, height: 1280, paths: ['/video-30064.m4s'] }];
+  const requests = [{ role: 'playback', qualityId: 80, resourcePath: '/video-30080.m4s', bytes: 1574235 },
+    { role: 'playback', qualityId: 64, resourcePath: '/video-30064.m4s', bytes: 114545 }];
+  assert.equal(requests.at(-1).qualityId, 64);
+  assert.equal(qualityPrepared(sample, selection, representations, requests), true);
+  assert.equal(qualityPrepared({ ...sample, nativeQuality: { nowQ: 0, newQ: 0, realQ: 80 } }, selection, representations, requests), false);
+  assert.equal(qualityPrepared({ ...sample, nativeQuality: { nowQ: 112, newQ: 112, realQ: 112 } }, selection, representations, requests), false);
+  assert.equal(qualityPrepared(sample, selection, representations, requests.slice(1)), false);
 });
 
 test('native quality request is awaited, leaves audio unspecified, and skips an already selected quality', async () => {
