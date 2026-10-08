@@ -52,7 +52,7 @@ BiliSmoothRoutingPolicy.addressForHost(rawUrl, host); // 改写后的地址字�
 - `getState()` 刷新观察并组合排名、开播/恢复摘要、曲线和近期事件，供仪表盘和控制桥使用。
 - `getDiagnostics()` 返回独立导出结构，明确去除 `videoMeta`，并限制事件、请求信息和媒体地址的字段范围。
 
-`observedAt` 是观察时间，`hidden` 表示页面可见性；共享 `projectPlayback(snapshot, connected)` 将它们与 media.frameHealth 投影为 disconnected、waiting、error、ended、seeking、paused、buffering、frozen、smooth 或 playing。优化关闭是独立配置状态；只有近期健康且可见的画帧证据才投影 smooth。
+`observedAt` 是观察时间，`hidden` 表示页面可见性；首帧之前播放器为恢复观看位置进行的跳转投影为 buffering，开播等待时长由 startup 摘要记录，不计入卡顿次数；共享 `projectPlayback(snapshot, connected)` 将它们与 media.frameHealth 投影为 disconnected、waiting、error、ended、seeking、paused、buffering、frozen、smooth 或 playing。优化关闭是独立配置状态；只有近期健康且可见的画帧证据才投影 smooth。
 
 `bufferWallSeconds` 是内容缓冲除以实际倍速，`media.currentTime/duration` 来自播放器。速度以近期有效媒体传输 Mbps 转为十进制 MB/s，低于 1 MB/s 时使用十进制 KB/s；未知样本不补造。`videoMeta` 的标题、页面 URL 和公共封面只服务当前视频卡片；页面身份变化先清除旧身份，封面更新独立检查。
 

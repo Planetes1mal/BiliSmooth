@@ -467,6 +467,7 @@ test('startup preserves first milestones across repeated playinfo and distinguis
   assert.equal(h.kernelOptions.getPlaybackEvidence().startupPending, true);
   h.video.seeking = true; h.video.emit('seeking');
   s = h.api.getState(); assert.equal(s.startup.phase, 'startup-seeking'); assert.equal(s.startup.seekIntent, 'unknown');
+  assert.equal(s.media.playback, 'buffering', 'resuming a saved position before the first frame is shown as waiting for media');
   assert.equal(h.kernelOptions.getPlaybackEvidence().startupPending, true);
   h.video.emit('pause');
   assert.equal(h.api.getState().startup.phase, 'paused'); assert.equal(h.api.getState().startup.pauseEvidence, 'pause-event');

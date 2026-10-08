@@ -410,7 +410,9 @@
     if (waiting && active() && player.readyState >= 3 && health.state === 'healthy' && time - lastMovedAt <= 1500) {
       waiting = false; log('waiting-cleared', { reason: 'frames-and-clock-advancing', readyState: player.readyState, playhead: player.currentTime });
     }
-    let playback = availability ? 'error' : !player || player.error || !player.readyState ? 'idle' : player.ended ? 'ended' : player.seeking ? 'seeking' : player.paused ? 'paused' : waiting || player.readyState < 3 ? 'buffering' : 'playing';
+    // Resuming a saved position before the first frame is a media wait, not a user seek.
+    const startupSeek = player?.seeking && !startupPlaybackStarted && !startupPaused;
+    let playback = availability ? 'error' : !player || player.error || !player.readyState ? 'idle' : player.ended ? 'ended' : startupSeek ? 'buffering' : player.seeking ? 'seeking' : player.paused ? 'paused' : waiting || player.readyState < 3 ? 'buffering' : 'playing';
     if (playback === 'playing' && active() && (health.state === 'frozen' || health.source && health.reason === 'clock-not-advancing' && health.ageMs >= health.thresholdMs && time - lastMovedAt >= 2000)) playback = 'frozen';
     current = { present: !!player, playback, width, height, fps: matches && track.fps || null, fpsSource: matches && track.fps ? 'manifest' : null,
       duration: Number.isFinite(player?.duration) ? player.duration : null, currentTime: Number.isFinite(player?.currentTime) ? player.currentTime : null,
