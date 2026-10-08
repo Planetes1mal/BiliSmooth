@@ -167,6 +167,8 @@ test('quick controls preserve save failure, shared choice keyboard behavior and 
     const actual = await host.locator('#bs-actual').textContent();
     await host.locator('#bs-route').focus(); await page.keyboard.press('ArrowDown');
     await host.locator('.bs-choice-search').fill('akam');
+    assert.equal(await host.locator('[role=option]').count(), 0);
+    await host.locator('.bs-choice-search').fill('aliov');
     const menu = await host.locator('.bs-choice-layer[data-state=open]').boundingBox();
     await insideViewport(page, menu, 8);
     assert.equal(intersects(menu, await page.locator('.bpx-player-container').boundingBox()), false);
@@ -175,7 +177,7 @@ test('quick controls preserve save failure, shared choice keyboard behavior and 
     assert.equal(await host.locator('#bs-retry').isDisabled(), true);
     assert.equal(await host.locator('#bs-reset').isDisabled(), true);
     assert.equal(await host.locator('#bs-actual').textContent(), actual);
-    assert.match(await host.locator('#bs-target').textContent(), /AKAM/);
+    assert.match(await host.locator('#bs-target').textContent(), /ALIOV/);
     await host.locator('#bs-route').click(); await page.keyboard.press('Escape');
     assert.equal(await host.locator('.bs-choice-layer[data-state=open]').count(), 0);
     assert.equal(await host.getAttribute('data-expanded'), 'true', 'first Escape closes only the choice');

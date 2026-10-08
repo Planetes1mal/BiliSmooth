@@ -12,7 +12,11 @@
   }
   async function read(storage) {
     const current = await storage.get(key);
-    if (current[key] && typeof current[key] === 'object') return settings.normalize(current[key]);
+    if (current[key] && typeof current[key] === 'object') {
+      const config = settings.normalize(current[key]);
+      if (current[key].selection === 'fixed' && config.selection === 'auto') await storage.set({ [key]: config });
+      return config;
+    }
     const data = await storage.get(null);
     const candidates = Object.entries(data).filter(([name,value]) => name !== key && isPreferences(value));
     const groups = new Set(candidates.map(([,value]) => JSON.stringify(settings.normalize(value))));

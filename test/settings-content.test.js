@@ -68,6 +68,18 @@ test('one-time migration preserves old preferences and rollback records without 
   assert.deepEqual(h.store['prior.preferences'], legacy);
 });
 
+test('saved Akamai fixed routes migrate to automatic selection and cannot be selected again', async () => {
+  for (const [key, host] of [[migration.key, 'upos-hz-mirrorakam.akamaized.net'], ['prior.preferences', 'upos-sz-mirrorakam.akamaized.net']]) {
+    const saved = { enabled: true, selection: 'fixed', pcdnHost: host, lang: 'en' };
+    const h = extension({ [key]: saved }), { result } = await h.command('read');
+    assert.equal(result.selection, 'auto'); assert.equal(result.pcdnHost, settings.defaults.pcdnHost);
+    assert.equal(result.lang, 'en'); assert.equal(h.store[migration.key].selection, 'auto');
+    assert.equal(settings.normalize(saved).selection, 'auto');
+    assert.equal(settings.isCdnHost(host), false); assert.equal(settings.patch({ pcdnHost: host }).pcdnHost, undefined);
+    assert.equal(settings.fixedHosts.includes(host), false);
+  }
+});
+
 test('simultaneous video-tab patches serialize and preserve unrelated settings', async () => {
   const h = extension({ [migration.key]: settings.normalize({ enabled: false, lang: 'en' }) });
   const a = h.content(), b = h.content(); await flush();

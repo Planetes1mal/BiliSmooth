@@ -7,7 +7,7 @@
     'upos-sz-mirrorcos.bilivideo.com', 'upos-tf-all-tx.bilivideo.com',
     'upos-sz-mirrorhwb.bilivideo.com'
   ]);
-  const fixedHosts = Object.freeze([...candidatePool, 'upos-hz-mirrorakam.akamaized.net', 'upos-sz-mirrorakam.akamaized.net']);
+  const fixedHosts = candidatePool;
   const accents = Object.freeze(['peach', 'bili', 'teal', 'emerald', 'violet', 'pink', 'sunset', 'graphite']);
   const floatingEntryTypes = Object.freeze(['status-logo', 'logo', 'status', 'speed', 'buffer', 'combined', 'route', 'rate', 'resolution']);
   const defaults = Object.freeze({ schemaVersion: 4, enabled: true, selection: 'auto', mode: 'bad-only',
@@ -22,7 +22,7 @@
   }
   function isCdnHost(raw) {
     const host = cleanHost(raw);
-    return /^upos-[a-z0-9-]+\.bilivideo\.(?:com|cn|net)$/.test(host) || /^upos-[a-z0-9-]+\.akamaized\.net$/.test(host);
+    return /^upos-[a-z0-9-]+\.bilivideo\.(?:com|cn|net)$/.test(host);
   }
   function patch(value) {
     const input = value && typeof value === 'object' ? value : {}, result = {};
@@ -38,6 +38,7 @@
   }
   function normalize(value) {
     const result = { ...defaults, ...patch(value), schemaVersion: 4, candidatePool: [...candidatePool], maxDepth: 20 };
+    if (value?.selection === 'fixed' && /\.akamaized\.net$/.test(cleanHost(value.pcdnHost))) result.selection = 'auto';
     result.floatingFields = [...result.floatingFields];
     return result;
   }
