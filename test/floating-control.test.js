@@ -33,7 +33,7 @@ async function fixture(options = {}) {
       retry() { fixture.calls.push({ action: 'retry' }); return true; }, resetNetwork() { fixture.calls.push({ action: 'reset' }); }, reload() { fixture.calls.push({ action: 'reload' }); },
       subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
     };
-    window.addEventListener('message', event => { if (event.data?.__bilismoothFloating === 'open-control') { fixture.calls.push({ action: 'open-control' }); window.postMessage({ __bilismoothFloating: 'opened', id: event.data.id, ok: true }, location.origin); } });
+    window.addEventListener('message', event => { if (event.data?.__bilismoothFloating === 'open-control') { fixture.calls.push({ action: 'open-control' }); window.postMessage({ __bilismoothFloating: 'opened', id: event.data.id, ok: !fixture.openError, error: fixture.openError }, location.origin); } });
   });
   await page.addScriptTag({ path: path.join(root, 'src/page/floating-control.js') });
   const host = page.locator('#bilismooth-floating');
@@ -183,6 +183,11 @@ test('quick controls preserve save failure, shared choice keyboard behavior and 
     await host.locator('[data-action=dashboard]').click();
     await page.waitForFunction(() => fixture.calls.some(row => row.action === 'open-control'));
     assert.ok(await page.evaluate(() => fixture.calls.some(row => row.action === 'reset')));
+    await mutate(page, () => { fixture.openError = 'background-unreachable'; fixture.state.settingsSave = { status: 'error' }; fixture.notify(); });
+    await host.locator('[data-action=dashboard]').click();
+    await page.waitForFunction(() => /扩展后台未响应/.test(document.querySelector('#bilismooth-floating').shadowRoot.querySelector('#bs-feedback').textContent));
+    await mutate(page, () => fixture.notify());
+    assert.match(await host.locator('#bs-feedback').textContent(), /扩展后台未响应/, 'a pending save error must not replace the dashboard failure');
     assert.deepEqual(errors, []);
   } finally { await context.close(); }
 });

@@ -21,8 +21,8 @@
 
   Object.assign(words.zh, { buffer: '可播余量', speed: '下载速度', waiting: '等待播放', disconnected: '尚未连接', errorState: '播放错误', routeSearch: '搜索播放线路', optimize: '优化', entry: '播放助手：悬停查看指标，点击打开面板', preview: '查看播放指标', limited: '此处没有足够空间展开，请调整位置', move: '点击打开面板；拖动或方向键移动，Home 复位' });
   Object.assign(words.en, { buffer: 'Playable buffer', speed: 'Download speed', waiting: 'Awaiting playback', disconnected: 'Not connected', errorState: 'Playback error', routeSearch: 'Search playback routes', optimize: 'Optimize', entry: 'Playback helper: hover for metrics, click for controls', preview: 'Show playback metrics', limited: 'Not enough room here. Move the tab to expand.', move: 'Click for controls; drag or use arrow keys to move, Home to reset' });
-  Object.assign(words.zh,{actual:'当前请求',target:'后续请求目标',retry:'切换备用',entry:'BiliSmooth：拖动调整位置，悬停查看预览',detailSmooth:'画帧连续 · 缓冲充足',detailBuffering:'等待数据 · 正在补充',detailFrozen:'画帧中断 · 等待恢复',detailPaused:'播放暂停 · 监测保留',detailWaiting:'等待有效播放数据',detailPlaying:'正在播放 · 等待画帧确认',detailSeeking:'正在跳转 · 等待新画帧',detailEnded:'视频已播放完毕',detailError:'播放器报告错误'});
-  Object.assign(words.en,{actual:'Current request',target:'Future request target',retry:'Try backup',entry:'BiliSmooth: drag to move, hover to preview',detailSmooth:'Frames advancing · Buffer ready',detailBuffering:'Waiting for data · Filling buffer',detailFrozen:'Frames interrupted · Awaiting recovery',detailPaused:'Paused · Monitoring retained',detailWaiting:'Waiting for playback evidence',detailPlaying:'Playing · Awaiting frame evidence',detailSeeking:'Seeking · Waiting for new frames',detailEnded:'Playback has ended',detailError:'Player reported an error'});
+  Object.assign(words.zh,{backgroundUnavailable:'扩展后台未响应，无法打开仪表盘。请在浏览器扩展管理页重新加载 BiliSmooth。',actual:'当前请求',target:'后续请求目标',retry:'切换备用',entry:'BiliSmooth：拖动调整位置，悬停查看预览',detailSmooth:'画帧连续 · 缓冲充足',detailBuffering:'等待数据 · 正在补充',detailFrozen:'画帧中断 · 等待恢复',detailPaused:'播放暂停 · 监测保留',detailWaiting:'等待有效播放数据',detailPlaying:'正在播放 · 等待画帧确认',detailSeeking:'正在跳转 · 等待新画帧',detailEnded:'视频已播放完毕',detailError:'播放器报告错误'});
+  Object.assign(words.en,{backgroundUnavailable:'The extension background is not responding, so the dashboard cannot open. Reload BiliSmooth on the browser’s extensions page.',actual:'Current request',target:'Future request target',retry:'Try backup',entry:'BiliSmooth: drag to move, hover to preview',detailSmooth:'Frames advancing · Buffer ready',detailBuffering:'Waiting for data · Filling buffer',detailFrozen:'Frames interrupted · Awaiting recovery',detailPaused:'Paused · Monitoring retained',detailWaiting:'Waiting for playback evidence',detailPlaying:'Playing · Awaiting frame evidence',detailSeeking:'Seeking · Waiting for new frames',detailEnded:'Playback has ended',detailError:'Player reported an error'});
   const glyphs = {
     download: '<path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/>',
     clock: '<path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 7v5l3 3"/>',
@@ -453,6 +453,8 @@
     $('bs-retry').title = $('bs-reset').title = notice?.copy || (automatic ? '' : t('inactive'));
     $('bs-reload-notice').hidden = !current.needReload || saving || failed;
     $('bs-save-retry').hidden = !failed;
+    // A failed dashboard request stays visible until the next explicit action.
+    if (feedbackKind === 'dashboard') return;
     if (saving) feedback(t('saving'), false, 'save');
     else if (failed) feedback(t('saveFailed'), true, 'save');
     else if (current.reloadReasons?.includes('storage-read-failed')) feedback(t('readFailed'), true, 'read');
@@ -490,8 +492,9 @@
       else if (name === 'dashboard') { await openDashboard(); message = null; }
       else if (name === 'reload') { runtime.reload(); await runtime.flushSettings(); scope.location.reload(); message = null; }
       feedback(message ? t(message) : ''); return true;
-    } catch {
-      feedback(t(name === 'dashboard' ? 'openFailed' : name === 'reload' ? 'reloadFailed' : snapshot().settingsSave?.status === 'error' ? 'saveFailed' : 'error'), true);
+    } catch (error) {
+      if (name === 'dashboard') feedback(t(error?.message === 'background-unreachable' ? 'backgroundUnavailable' : 'openFailed'), true, 'dashboard');
+      else feedback(t(name === 'reload' ? 'reloadFailed' : snapshot().settingsSave?.status === 'error' ? 'saveFailed' : 'error'), true);
       return false;
     } finally { busy = false; render(); }
   }
@@ -687,7 +690,7 @@
     if (message?.__bilismoothFloating === 'opened') {
       const pending = opening.get(message.id); if (!pending) return;
       scope.clearTimeout(pending.timer); opening.delete(message.id);
-      message.ok ? pending.resolve() : pending.reject(new Error('open-control-failed'));
+      message.ok ? pending.resolve() : pending.reject(new Error(message.error === 'background-unreachable' ? message.error : 'open-control-failed'));
     }
   });
   listen(scope, 'pagehide', () => {

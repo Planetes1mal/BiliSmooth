@@ -36,16 +36,18 @@ function extension(initial = {}) {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/extension/background.js'), 'utf8'), {
     chrome, importScripts() {}, BiliSmoothSettings: settings, BiliSmoothSettingsMigration: migration, URL, setTimeout, clearTimeout
   });
-  function content() {
-    const posted = [], events = [], runtime = [];
-    const pageChrome = { ...chrome, runtime: { ...chrome.runtime, onMessage: { addListener: fn => runtime.push(fn) } } };
-    const scope = { chrome: pageChrome, location: { origin: 'https://www.bilibili.com' }, crypto, setTimeout, clearTimeout,
+  function content({ unreachable = false } = {}) {
+    const posted = [], events = [], runtime = [], sent = [];
+    const sendMessage = unreachable ? async message => { sent.push(message); throw Error('Could not establish connection. Receiving end does not exist.'); } : chrome.runtime.sendMessage;
+    const pageChrome = { ...chrome, runtime: { ...chrome.runtime, sendMessage, onMessage: { addListener: fn => runtime.push(fn) } } };
+    const scope = { chrome: pageChrome, location: { origin: 'https://www.bilibili.com' }, crypto, clearTimeout,
+      setTimeout: unreachable ? fn => Promise.resolve().then(fn) : setTimeout, BiliSmoothSettings: settings, BiliSmoothSettingsMigration: migration,
       postMessage: message => posted.push(message), addEventListener: (type, fn) => { if (type === 'message') events.push(fn); } };
     scope.window = scope;
     const context = vm.createContext(scope);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/extension/content.js'), 'utf8'), context);
     function message(data) { context.input = data; context.events = events; vm.runInContext('events.forEach(fn=>fn({source:window,origin:location.origin,data:input}))', context); }
-    return { posted, message, runtime };
+    return { posted, message, runtime, sent };
   }
   const command = (action, patch) => chrome.runtime.sendMessage({ channel: 'bilismooth-settings', action, patch });
   return { store, writes, messages, content, command, tabs, actionListeners, reloads, tabUpdates, updates, removals, completeReload,
@@ -93,6 +95,17 @@ test('ordinary save failure is acknowledged; later retry can succeed', async () 
   assert.equal(page.posted.find(row => row.id === 'failed').ok, false); assert.equal(h.store[migration.key].mode, 'bad-only');
   h.failWrite(false); page.message({ __bilismoothConfig: 'save', patch: { mode: 'force' }, id: 'retry' }); await flush();
   assert.equal(page.posted.find(row => row.id === 'retry').ok, true); assert.equal(h.store[migration.key].mode, 'force');
+});
+test('an unreachable background keeps saved settings usable and reports why the dashboard cannot open', async () => {
+  const h = extension({ [migration.key]: settings.normalize({ lang: 'en' }) }), page = h.content({ unreachable: true }); await flush();
+  assert.equal(page.posted.find(row => row.__bilismoothConfig === 'config')?.config.lang, 'en');
+  page.message({ __bilismoothConfig: 'save', patch: { theme: 'dark' }, id: 'direct' }); await flush();
+  assert.equal(page.posted.find(row => row.id === 'direct').ok, true);
+  assert.equal(h.store[migration.key].theme, 'dark'); assert.equal(h.store[migration.key].lang, 'en');
+  page.message({ __bilismoothFloating: 'open-control', id: 'open' }); await flush();
+  const opened = page.posted.find(row => row.id === 'open');
+  assert.deepEqual([opened.ok, opened.error], [false, 'background-unreachable']);
+  assert.equal(page.sent.filter(row => row.action === 'open').length, 3, 'a starting worker gets bounded retries');
 });
 test('read failure is visible and does not reset stored settings', async () => {
   const h = extension({ [migration.key]: settings.normalize({ enabled: false }) }); h.failRead(true);

@@ -62,7 +62,7 @@ BiliSmoothRoutingPolicy.addressForHost(rawUrl, host); // 改写后的地址字�
 
 ## 配置和消息
 
-`bilismooth.config.v4` 是唯一扩展设置权威。后台对 read/patch 串行执行“读取最新值 → 白名单合并 → 写入 → 回执”，避免多页整份覆盖。`floatingFields` 允许 status/speed/buffer，按固定顺序去重规范化，允许空数组；状态图形不受文字字段隐藏影响。
+`bilismooth.config.v4` 是唯一扩展设置权威。后台对 read/patch 串行执行“读取最新值 → 白名单合并 → 写入 → 回执”，避免多页整份覆盖。隔离世界向后台发送消息遇到“接收端不存在”时短暂重试两次；后台仍不可达时，设置读写改由内容脚本按同一迁移与合并规则直接访问扩展存储，只失去跨标签页排队，仪表盘入口报告 `background-unreachable` 并提示重新加载扩展。`floatingFields` 允许 status/speed/buffer，按固定顺序去重规范化，允许空数组；状态图形不受文字字段隐藏影响。
 
 `settings-migration.js` 在当前记录缺失时按数据结构查找偏好，并保存导入备份；不依赖产品名称别名，不改写导入源。存在多个不同的规范化配置时返回读取错误，避免静默挑选。当前 v4 始终优先。配置包含 floatingEntryEnabled、floatingEntryType、floatingEdgeSnap 白名单字段；缺失时补三态、状态 logo、轻吸附默认值，保留用户已有偏好和 schemaVersion 4。
 

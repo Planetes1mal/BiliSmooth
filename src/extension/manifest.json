@@ -54,6 +54,7 @@
       ],
       "js": [
         "settings.js",
+        "settings-migration.js",
         "content.js"
       ],
       "run_at": "document_start"
