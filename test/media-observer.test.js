@@ -106,3 +106,60 @@ test('delivery sessions retain native signatures, derive only UPOS mirrors and r
   assert.ok(session.representations.every(rep => rep.issuedHosts.length === (rep.kind === 'audio' ? 1 : 2)));
   assert.doesNotMatch(JSON.stringify(session), /https?:|private|sign=/);
 });
+
+test('complete video XHR samples expose conservative rates, first-byte timing and bounded recent delivery', () => {
+  const throughput = require('../src/core/throughput.js'), load = require('./support/kernel-harness.cjs');
+  const host = 'upos-sz-mirrorcosov.bilivideo.com', MiB = 1024 * 1024;
+  const sample = (patch = {}) => ({ host, kind: 'video', transport: 'xhr', outcome: 'complete', hidden: false,
+    range: 'bytes=0-131071', bytes: 128 * 1024, elapsedMs: 2000, firstByteMs: 500, completedAt: 2000, ...patch });
+  const cases = [
+    ...[{ kind: 'audio' }, { transport: 'fetch' }, { outcome: 'aborted' }, { hidden: true }, { bytes: 16383 }]
+      .map(patch => ({ name: JSON.stringify(patch), samples: [sample(patch)], expected: [] })),
+    { name: '16 KiB is measured but not trusted', samples: [sample({ bytes: 16384 })],
+      expected: { goodputBps: null, ttfbMedianMs: 500, recentBytes: 16384, recentMs: 2000, recentBps: 65536 } },
+    { name: '128 KiB is trusted and first estimate is bias-corrected', samples: [sample()],
+      expected: { goodputBps: 524288, ttfbMedianMs: 500, recentBytes: 131072, recentMs: 2000, recentBps: 524288 } },
+    { name: 'first-byte waiting remains in goodput', samples: [sample({ firstByteMs: 1900 })],
+      expected: { goodputBps: 524288, ttfbMedianMs: 1900 } },
+    { name: 'rising rate uses slower average and aggregates trust', samples: [sample({ bytes: 65536, firstByteMs: 100 }), sample({ completedAt: 4000, firstByteMs: 300 })],
+      expected: { goodputBps: 411270.924791, ttfbMedianMs: 200 } },
+    { name: 'falling rate uses faster average', samples: [sample(), sample({ bytes: 65536, completedAt: 4000 })],
+      expected: { goodputBps: 349525.333333, ttfbMedianMs: 500 } },
+    { name: 'longer samples receive duration-based weight', samples: [sample(), sample({ elapsedMs: 4000, completedAt: 6000 })],
+      expected: { goodputBps: 299593.142857, ttfbMedianMs: 500 } },
+    { name: '4 MiB recent window removes earlier samples', samples: [100, 200, 300, 400, 500].map((firstByteMs, i) => sample({ bytes: MiB, elapsedMs: 1000, firstByteMs, completedAt: (i + 1) * 1000 })),
+      expected: { goodputBps: 8388608, ttfbMedianMs: 350, recentBytes: 4 * MiB, recentMs: 4000, recentBps: 8388608 } },
+    { name: '8 second recent window removes earlier samples', samples: [100, 200, 300, 400, 500].map((firstByteMs, i) => sample({ firstByteMs, completedAt: (i + 1) * 2000 })),
+      expected: { goodputBps: 524288, ttfbMedianMs: 350, recentBytes: 524288, recentMs: 8000, recentBps: 524288 } }
+  ];
+  for (const { name, samples, expected } of cases) {
+    const meter = throughput.create(); samples.forEach(value => meter.record(value)); const rows = meter.snapshot();
+    if (Array.isArray(expected)) { assert.deepEqual(rows, expected, name); continue; }
+    assert.equal(rows.length, 1, name); assert.equal(rows[0].host, host, name);
+    for (const [key, value] of Object.entries(expected)) {
+      if (value === null) assert.equal(rows[0][key], null, `${name}: ${key}`);
+      else assert.ok(Math.abs(rows[0][key] - value) < 0.001, `${name}: ${key} ${rows[0][key]} != ${value}`);
+    }
+    const last = samples.at(-1);
+    assert.deepEqual(rows[0].lastFragment, { range: last.range, firstByteMs: last.firstByteMs, elapsedMs: last.elapsedMs, completedAt: last.completedAt }, name);
+  }
+  const media = id => `https://${host}/upgcxcode/1/${id}-1-30080.m4s?sign=PRIVATE`, raw = media(42231991605);
+  const payload = address => ({ dash: { video: [{ id: 120, bandwidth: 2000000, baseUrl: address }] } });
+  const h = load({ session: true, now: 100000, config: { enabled: false }, payload: payload(raw) });
+  for (const hidden of [false, true]) {
+    const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', raw); xhr.setRequestHeader('Range', 'bytes=0-131071'); xhr.send();
+    h.advance(100); xhr.progress(65536);
+    h.document.hidden = hidden; h.document.emit('visibilitychange'); h.advance(900);
+    h.document.hidden = false; h.document.emit('visibilitychange'); h.advance(1000); xhr.complete(131072);
+  }
+  const initial = h.api.getDiagnostics().session.hosts[0];
+  assert.equal(initial.goodputBps, 524288); assert.equal(initial.ttfbMedianMs, 100);
+  assert.deepEqual(JSON.parse(JSON.stringify(initial.lastFragment)), { range: 'bytes=0-131071', firstByteMs: 100, elapsedMs: 2000, completedAt: 102000 });
+  const next = media(42242147914); h.scope.__playinfo__ = payload(next);
+  const xhr = h.request(next); h.advance(500); xhr.progress(32768); h.advance(500); xhr.complete(65536);
+  const current = h.api.getDiagnostics().session; assert.equal(current.hosts[0].goodputBps, null);
+  assert.equal(current.cid, '42242147914'); assert.equal(current.hosts[0].ttfbMedianMs, 500);
+  h.request(raw); assert.equal(h.api.getDiagnostics().session.hosts[0].goodputBps, 524288);
+  assert.doesNotMatch(JSON.stringify(h.api.getDiagnostics()), /PRIVATE|sign=|https?:/); h.close();
+
+});

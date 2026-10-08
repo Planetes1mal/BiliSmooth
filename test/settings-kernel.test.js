@@ -45,7 +45,7 @@ function load() {
   scope.globalThis = scope;
   const context = vm.createContext(scope);
   const evaluate = file => vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
-  for (const file of ['src/core/settings.js', 'src/core/routing-policy.js', 'src/core/media-observer.js', 'src/core/delivery-session.js',
+  for (const file of ['src/core/settings.js', 'src/core/routing-policy.js', 'src/core/media-observer.js', 'src/core/delivery-session.js', 'src/core/delivery-policy.js', 'src/core/throughput.js',
     'src/page/frame-monitor.js', 'src/page/network-probe.js', 'src/page/request-interceptor.js', 'src/page/playback-kernel.js', 'src/page/passive-session.js']) evaluate(file);
   const kernel = vm.runInContext('BiliSmoothPlaybackKernel.create({scope:globalThis})', context);
   const message = config => {

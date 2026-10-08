@@ -148,10 +148,22 @@
       }
     }
     function listen(tx, name, fn, capture = false) { tx.xhr.addEventListener(name, fn, capture); tx.listeners.push([name, fn, capture]); }
+    function measured(tx, bytes) {
+      if (bytes > 0 && tx.firstByteAt === null) tx.firstByteAt = now();
+      tx.hiddenOverlap ||= !!scope.document?.hidden;
+      return { firstByteAt: tx.firstByteAt, firstByteMs: tx.firstByteAt === null ? null : tx.firstByteAt - tx.startedAt,
+        hiddenOverlap: tx.hiddenOverlap };
+    }
+    function onVisibilityChange() {
+      if (scope.document.hidden) for (const tx of live) if (tx.sent && !tx.finished) tx.hiddenOverlap = true;
+    }
+    scope.document?.addEventListener?.('visibilitychange', onVisibilityChange);
     function outcome(tx, name, complete = false, loaded = 0) {
       if (tx.finished) return;
       tx.finished = true;
-      transfer(tx.token, { status: Number(tx.xhr.status) || 0, responseUrl: tx.xhr.responseURL || '', bytes: Math.max(tx.bytes, Number(loaded) || 0), complete, outcome: name });
+      const bytes = Math.max(tx.bytes, Number(loaded) || 0);
+      transfer(tx.token, { status: Number(tx.xhr.status) || 0, responseUrl: tx.xhr.responseURL || '', bytes, complete, outcome: name,
+        ...measured(tx, bytes), completedAt: now() });
     }
     function attachEarly(xhr) {
       if (earlyListeners.has(xhr)) return;
@@ -216,7 +228,7 @@
       attachEarly(this); // Also support an instance created before installation.
       const sourceUrl = readUrl(address) || String(address), url = route(sourceUrl);
       const returned = Reflect.apply(original.open, this, [method, url === sourceUrl ? address : url, ...remaining]);
-      const tx = { xhr: this, sourceUrl, url, method: String(method).toUpperCase(), range: '', bytes: 0, listeners: [], fields: [], token: null, sent: false, finished: false, loaded: false };
+      const tx = { xhr: this, sourceUrl, url, method: String(method).toUpperCase(), range: '', bytes: 0, firstByteAt: null, listeners: [], fields: [], token: null, sent: false, finished: false, loaded: false };
       transactions.set(this, tx); live.add(tx);
       addReaders(tx); return returned;
     }
@@ -228,8 +240,8 @@
     function send() {
       const tx = transactions.get(this);
       if (!tx || tx.sent) return Reflect.apply(original.send, this, arguments);
-      tx.sent = true; tx.token = begin(tx.sourceUrl, tx.url, 'xhr', tx.method, tx.range);
-      listen(tx, 'progress', event => { tx.bytes = Math.max(tx.bytes, Number(event.loaded) || 0); transfer(tx.token, { status: Number(tx.xhr.status) || 0, responseUrl: tx.xhr.responseURL || '', bytes: tx.bytes, outcome: 'progress' }, 'progress'); });
+      tx.sent = true; tx.startedAt = now(); tx.hiddenOverlap = !!scope.document?.hidden; tx.token = begin(tx.sourceUrl, tx.url, 'xhr', tx.method, tx.range);
+      listen(tx, 'progress', event => { tx.bytes = Math.max(tx.bytes, Number(event.loaded) || 0); transfer(tx.token, { status: Number(tx.xhr.status) || 0, responseUrl: tx.xhr.responseURL || '', bytes: tx.bytes, outcome: 'progress', ...measured(tx, tx.bytes) }, 'progress'); });
       listen(tx, 'load', () => { if (transactions.get(tx.xhr) === tx && tx.xhr.readyState === 4) { tx.loaded = true; tx.prepare?.(); } });
       listen(tx, 'loadend', event => {
         // A consumer can reopen this same native instance inside error/load.
@@ -269,6 +281,7 @@
     function destroy() {
       if (disposed) return;
       disposed = true; timingObserver?.disconnect();
+      scope.document?.removeEventListener?.('visibilitychange', onVisibilityChange);
       for (const entry of pending.values()) removeFetch(entry);
       for (const tx of [...live]) detach(tx, true);
       for (const ref of readers) { const tx = ref.deref(); if (tx) detach(tx, true); } readers.clear();

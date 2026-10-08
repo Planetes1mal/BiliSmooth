@@ -100,7 +100,7 @@
     for (const key of ['host', 'requestedHost', 'responseHost', 'fromHost', 'toHost', 'reason', 'source', 'transport', 'kind', 'outcome', 'action']) {
       if (typeof fields[key] === 'string') row[key] = fields[key].replace(/https?:\/\/\S+|\?\S+/g, '[redacted]').slice(0, 160);
     }
-    for (const key of ['bytes', 'elapsedMs', 'durationMs', 'status', 'ageMs', 'buffer', 'mbps', 'readyState', 'playhead', 'rate', 'deadlineAt', 'dueInMs', 'delayMs', 'observedStallMs']) {
+    for (const key of ['bytes', 'elapsedMs', 'durationMs', 'status', 'ageMs', 'buffer', 'mbps', 'readyState', 'playhead', 'rate', 'deadlineAt', 'dueInMs', 'delayMs', 'observedStallMs', 'firstByteMs', 'completedAt']) {
       if (Number.isFinite(fields[key])) row[key] = fields[key];
     }
     for (const key of ['paused', 'seeking', 'ended', 'hidden']) if (typeof fields[key] === 'boolean') row[key] = fields[key];
@@ -271,7 +271,7 @@
         entry.finished = true; entry.status = event.status;
         log('transfer', { id: event.id, at: event.at, host: responseHost, responseHost,
           requestedHost: entry.host || hostOf(entry.url), transport: entry.transport, kind: entry.track?.kind,
-          bytes, status: event.status, elapsedMs: event.elapsedMs, outcome: event.outcome });
+          bytes, status: event.status, elapsedMs: event.elapsedMs, firstByteMs: event.firstByteMs, completedAt: event.completedAt, outcome: event.outcome });
       }
       if (event.outcome === 'response') { entry.status = event.status; entry.headersReceived = true; }
       return;
@@ -495,7 +495,7 @@
     return { ...viewState(), kernelVersion: 'playback-2.6.0',
       reason: current.playback === 'frozen' ? 'frame-stalled' : '', rate, buffer,
       bufferMediaSeconds: buffer, bufferWallSeconds: bufferWallSeconds(buffer),
-      startup: startupSnapshot(), startupHistory: clone(startupHistory),
+      startup: startupSnapshot(), startupHistory: clone(startupHistory), session: k.session,
       actualHost, requestedHost, targetHost: config.pcdnHost, audioHost, lastMbps, lastTransferAt, speedObservedAt,
       probing: !!k.probing, probedAt: k.probedAt || 0, probeBytes: k.probeBytes || 0, rewriteCount: k.rewriteCount || 0,
       recoveryAttempts: k.recoveries || 0, ...totals, counters: totals, ranking, effectiveRanking, playbackFeedback, allowedHosts: [...settings.fixedHosts],

@@ -7,7 +7,7 @@
   const RANK_PREFIX = 'bilismooth.routing.rank.v4.', FEEDBACK_PREFIX = 'biliSmooth.playback-feedback.v1.';
   const RANK_TTL_MS = 21600000, STALL_GRACE_MS = 2500, STALL_RETRY_MS = 5000;
   const PROBE_TIMEOUT_MS = 4000, PROBE_MAX_HOSTS = 12, PROBE_BYTES = 786432, EVIDENCE_MAX_AGE_MS = 1500, NO_RESPONSE_MS = 2000;
-  const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js'), delivery: require('../core/delivery-session.js') } : {};
+  const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js'), delivery: require('../core/delivery-session.js'), throughput: require('../core/throughput.js') } : {};
   function create(options = {}) {
     const root = options.scope || global;
     if (instances.has(root)) return instances.get(root);
@@ -16,7 +16,8 @@
     const RequestLayer = root.BiliSmoothRequestInterceptor || global.BiliSmoothRequestInterceptor || imported.requests;
     const Probes = root.BiliSmoothNetworkProbe || global.BiliSmoothNetworkProbe || imported.probes;
     const DeliverySession = root.BiliSmoothDeliverySession || global.BiliSmoothDeliverySession || imported.delivery;
-    if (!core || !RequestLayer || !Probes || !DeliverySession) throw Error('BiliSmooth playback dependencies are unavailable');
+    const Throughput = root.BiliSmoothThroughput || global.BiliSmoothThroughput || imported.throughput;
+    if (!core || !RequestLayer || !Probes || !DeliverySession || !Throughput) throw Error('BiliSmooth playback dependencies are unavailable');
     const document = root.document, json = root.JSON || JSON;
     const nativeParse = json.parse, nativeStringify = json.stringify, nativeFetch = root.fetch;
     const plainCopy = value => Reflect.apply(nativeParse,json,[Reflect.apply(nativeStringify,json,[value])]);
@@ -25,7 +26,7 @@
     const every = (root.setInterval || global.setInterval).bind(root), clearEvery = (root.clearInterval || global.clearInterval).bind(root);
     let config = settings.normalize(options.config), destroyed = false, interceptor = null;
     let policy = core.createPolicy(config);
-    const delivery = DeliverySession.create({ pool: config.candidatePool }), preparedPayloads = new WeakSet();
+    const delivery = DeliverySession.create({ pool: config.candidatePool }), preparedPayloads = new WeakSet(), measurements = new Map();
     let watchedVideo = null, watchTimer = null, stallTimer = null, stallDeadlineAt = null, rotateCursor = 0;
     let requestSerial = 0, networkEpoch = 0, feedbackGeneration, recentVideoFailure = null, lastVideoHost = null, lastRecoveryAt = -Infinity;
     let feedback = null, probeEpoch = 0, probeRound = null, probed = false, lastSample = null;
@@ -185,7 +186,7 @@
       watchVideo();
       let kind = 'unknown';
       try { kind = options.classifyRequest?.(originalUrl, url) || kind; } catch (_) {}
-      delivery.request(originalUrl) || delivery.request(url);
+      const representation = delivery.request(originalUrl) || delivery.request(url);
       const evidence = playbackEvidence();
       const generation = evidence?.mediaGeneration ?? requestGeneration();
       if (generation !== feedbackGeneration) {
@@ -193,6 +194,7 @@
       }
       const request = { id: 'media-' + (++requestSerial), originalUrl: absolute(originalUrl), url: absolute(url), host: hostOf(url),
         transport, method, range, startedAt: now(), kind, networkEpoch,
+        cid: representation?.cid ?? null, representationKind: representation?.kind ?? null,
         mediaGeneration: generation, player: watchedVideo };
       state.lastMediaHost = request.host || state.lastMediaHost;
       if (kind === 'video' || kind === 'muxed') lastVideoHost = request.host;
@@ -207,6 +209,14 @@
         transport: request.transport, method: request.method, range: request.range, startedAt: request.startedAt,
         elapsedMs: Math.max(0, now() - request.startedAt), bytes: 0, complete: false, ...detail };
       emit(event);
+      if (type === 'transfer' && request.cid && request.networkEpoch === networkEpoch) {
+        let meter = measurements.get(request.cid);
+        if (!meter) { meter = Throughput.create(); measurements.set(request.cid, meter); }
+        meter.record({ host: event.host, kind: request.representationKind, transport: request.transport,
+          range: /^bytes=\d+-\d*$/.test(request.range) ? request.range : '', bytes: event.bytes, elapsedMs: event.elapsedMs,
+          firstByteMs: event.firstByteMs, completedAt: event.completedAt, hidden: event.hiddenOverlap,
+          outcome: event.complete ? event.outcome : 'incomplete' });
+      }
       try { observePlaybackTransfer(request, event); } catch (_) { /* Feedback cannot affect native delivery. */ }
     }
     function playerContext() {
@@ -334,7 +344,7 @@
       for(const [name,fn]of playerHandlers)watchedVideo?.addEventListener(name,fn,{passive:true});
     }
     function resetNetwork(){
-      networkEpoch++;stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;avoided.clear();
+      networkEpoch++;measurements.clear();stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;avoided.clear();
       feedback?.clear();saveFeedback();recentVideoFailure=null;lastVideoHost=null;lastRecoveryAt=-Infinity;rotateCursor=0;
       recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);cancelStall('network-reset');
       try{root.localStorage?.removeItem(rankingKey());}catch{}log('network-reset');
@@ -351,7 +361,11 @@
     }
     function getConfig(){return plainCopy(config);}
     function getFlags(){return {needReload:state.needReload,probing:state.probing};}
-    function getState(){return {...plainCopy(state),config:getConfig(),effectiveRanking:recoveryCandidates(),playbackFeedback:feedback?.snapshot()||null,session:delivery.snapshot()};}
+    function sessionSnapshot() {
+      const session = delivery.snapshot();
+      return session ? { ...session, hosts: measurements.get(session.cid)?.snapshot() || [] } : null;
+    }
+    function getState(){return {...plainCopy(state),config:getConfig(),effectiveRanking:recoveryCandidates(),playbackFeedback:feedback?.snapshot()||null,session:sessionSnapshot()};}
     function retry(){
       if(!active()||config.selection!=='auto'||!rotateTarget(stallingHost(),'manual'))return false;
       state.recoveries++;
