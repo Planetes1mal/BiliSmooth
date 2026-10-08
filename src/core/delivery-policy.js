@@ -17,7 +17,25 @@
     HISTORY_HALF_LIFE_MS: 3 * 24 * 60 * 60 * 1000, HISTORY_FAILURE_MS: 60 * 60 * 1000,
     EXPLORATION_SHARE: 1 / 5
   });
-  const api = Object.freeze({ constants });
+  function decide(input) {
+    const { requestAgeMs, firstByteMs, rangeBytes, transferMs, loadedBytes, goodputBps, remainingMs,
+      bufferWallSeconds, recent, requiredBps, now, failedAt } = input;
+    const firstByteStuck = firstByteMs === null && requestAgeMs >= constants.STUCK_FIRST_BYTE_MS
+      && bufferWallSeconds < constants.STUCK_BUFFER_SECONDS;
+    const deliveryStuck = (transferMs >= constants.STUCK_TRANSFER_MIN_MS || loadedBytes >= constants.STUCK_LOADED_MIN_BYTES)
+      && goodputBps !== null && goodputBps < requiredBps * constants.STUCK_RATE_FACTOR
+      && remainingMs !== null && remainingMs > constants.STUCK_REMAINING_MIN_MS
+      && remainingMs > (bufferWallSeconds - constants.COMPLETION_RESERVE_SECONDS) * 1000;
+    if (rangeBytes >= constants.STUCK_RANGE_MIN_BYTES && (firstByteStuck || deliveryStuck)) return 'stuck';
+    if ((recent.bytes >= constants.THROUGHPUT_RECENT_BYTES || recent.elapsedMs >= constants.THROUGHPUT_RECENT_MS)
+      && recent.goodputBps !== null && recent.goodputBps < requiredBps * constants.SHORTFALL_RATE_FACTOR
+      && bufferWallSeconds < constants.SHORTFALL_BUFFER_SECONDS) return 'shortfall';
+    if (failedAt.filter(at => now - at <= constants.ERROR_WINDOW_MS).length >= constants.ERROR_COUNT) return 'errors';
+    return null;
+  }
+  // Both durations refer to the same byte count. Only completed contenders enter.
+  function beatsCurrent(candidate, current) { return candidate * constants.RACE_SPEEDUP <= current; }
+  const api = Object.freeze({ constants, decide, beatsCurrent });
   scope.BiliSmoothDeliveryPolicy = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(globalThis);

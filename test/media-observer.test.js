@@ -163,3 +163,36 @@ test('complete video XHR samples expose conservative rates, first-byte timing an
   assert.doesNotMatch(JSON.stringify(h.api.getDiagnostics()), /PRIVATE|sign=|https?:/); h.close();
 
 });
+
+test('COSOV hanging, slow and repeated-timeout shapes trigger only their measured decisions', () => {
+  const { decide, beatsCurrent } = require('../src/core/delivery-policy.js');
+  const first = 1791477720540, second = 1791477736124, bytes = 2980583, elapsedMs = 10195.7;
+  const goodputBps = bytes * 8000 / elapsedMs;
+  const base = { requestAgeMs: 0, firstByteMs: 43.1, rangeBytes: 5874782, transferMs: 0, loadedBytes: 0,
+    goodputBps: null, remainingMs: null, bufferWallSeconds: 31.112,
+    recent: { bytes: 0, elapsedMs: 0, goodputBps: null }, requiredBps: 10133022, now: second, failedAt: [] };
+  const slow = { bytes, elapsedMs, goodputBps };
+  const delayed = { ...base, loadedBytes: bytes, transferMs: elapsedMs - base.firstByteMs, goodputBps,
+    remainingMs: (5874782 - bytes) * 8000 / goodputBps, bufferWallSeconds: 0.480092 };
+  // Recorded request values, with explicit decision-boundary variations of those shapes.
+  const rows = [
+    ['first-play D media-5 hangs without bytes', decide, [{ ...base, requestAgeMs: 2070, firstByteMs: null, bufferWallSeconds: 0 }], 'stuck'],
+    ['the later zero-byte wait has buffered playback', decide, [{ ...base, requestAgeMs: 2050, firstByteMs: null, bufferWallSeconds: 9 }], null],
+    ['do not trigger the first-byte rule before one second', decide, [{ ...base, requestAgeMs: 999, firstByteMs: null, bufferWallSeconds: 0 }], null],
+    ['small COSOV initialization ranges cannot trigger stuck', decide, [{ ...base, requestAgeMs: 2070, firstByteMs: null, rangeBytes: 4503, bufferWallSeconds: 0 }], null],
+    ['partial slow timeout exhausts the measured time window', decide, [{ ...base, recent: slow, bufferWallSeconds: 0 }], 'shortfall'],
+    ['the same slow transfer with enough buffer is retained', decide, [{ ...base, recent: slow, bufferWallSeconds: 30 }], null],
+    ['predicted remainder cannot beat the observed low buffer', decide, [delayed], 'stuck'],
+    ['ETA needs enough active transfer time or loaded bytes', decide, [{ ...delayed, transferMs: 499, loadedBytes: 65536 }], null],
+    ['half a second supplies the ETA observation time', decide, [{ ...delayed, transferMs: 500, loadedBytes: 65536 }], 'stuck'],
+    ['loaded bytes can satisfy ETA observation before half a second', decide, [{ ...delayed, transferMs: 499, loadedBytes: 131072 }], 'stuck'],
+    ['remaining transfers within one second keep the current host', decide, [{ ...delayed, remainingMs: 1000 }], null],
+    ['a current rate meeting the approved margin is retained', decide, [{ ...delayed, goodputBps: base.requiredBps * 1.3 }], null],
+    ['two recorded timeouts occur within thirty seconds', decide, [{ ...base, failedAt: [first, second] }], 'errors'],
+    ['the first recorded timeout has left the error window', decide, [{ ...base, now: first + 30001, failedAt: [first, second] }], null],
+    ['HW completion beats COSOV estimate for the same retry bytes', beatsCurrent, [2962.9, 5874782 * 8000 / goodputBps], true],
+    ['a one-point-five speedup is enough', beatsCurrent, [2000, 3000], true],
+    ['a smaller speedup retains the current host', beatsCurrent, [2001, 3000], false]
+  ];
+  for (const [label, decideResult, args, expected] of rows) assert.equal(decideResult(...args), expected, label);
+});
