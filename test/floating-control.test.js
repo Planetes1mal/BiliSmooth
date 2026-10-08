@@ -18,7 +18,7 @@ async function fixture(options = {}) {
   for (const file of ['src/core/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js']) await page.addScriptTag({ path: path.join(root, file) });
   await page.evaluate(() => {
     const listeners = new Set(), config = BiliSmoothSettings.normalize();
-    const state = { config, media: { present: true, playback: 'playing', frameHealth: { state: 'healthy', ageMs: 25 } }, status: 'smooth', observedAt: Date.now(), mediaGeneration: 1, bufferWallSeconds: 14.2, lastMbps: 16, lastTransferAt: Date.now(), actualHost: config.pcdnHost, settingsSave: { status: 'saved' } };
+    const state = { config, media: { present: true, playback: 'playing', frameHealth: { state: 'healthy', ageMs: 25 } }, status: 'smooth', observedAt: Date.now(), mediaGeneration: 1, bufferWallSeconds: 14.2, lastMbps: 16, lastTransferAt: Date.now(), actualHost: config.pcdnHost, delivery: {status:'native',nativeHost:config.pcdnHost,activeHost:null,nextTestAt:0,canTest:true,comparedHosts:0}, settingsSave: { status: 'saved' } };
     const notify = () => listeners.forEach(fn => fn());
     window.fixture = { state, calls: [], fullReads: 0, viewReads: 0, fail: false, hold: false, notify, resolve: null, outsideClicks: 0 };
     document.querySelector('#outside-action').addEventListener('click', () => { fixture.outsideClicks++; });
@@ -30,7 +30,7 @@ async function fixture(options = {}) {
       setConfig(patch) { fixture.calls.push({ action: 'config', patch: structuredClone(patch) }); state.config = BiliSmoothSettings.normalize({ ...state.config, ...patch }); state.settingsSave = { status: 'pending' }; notify(); },
       applyRoute(host) { fixture.calls.push({ action: 'route', host }); this.setConfig({ enabled: true, selection: 'fixed', pcdnHost: host, mode: 'bad-only' }); return true; },
       async flushSettings() { fixture.calls.push({ action: 'flush' }); if (fixture.hold) await new Promise(resolve => { fixture.resolve = resolve; }); state.settingsSave = { status: fixture.fail ? 'error' : 'saved' }; notify(); if (fixture.fail) throw Error('storage-write-failed'); },
-      retry() { fixture.calls.push({ action: 'retry' }); return true; }, resetNetwork() { fixture.calls.push({ action: 'reset' }); }, reload() { fixture.calls.push({ action: 'reload' }); },
+      retry() { fixture.calls.push({ action: 'retry' }); state.delivery = {...state.delivery,status:'testing',canTest:false,nextTestAt:Date.now()+10000}; notify(); return true; }, resetNetwork() { fixture.calls.push({ action: 'reset' }); }, reload() { fixture.calls.push({ action: 'reload' }); },
       subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
     };
     window.addEventListener('message', event => { if (event.data?.__bilismoothFloating === 'open-control') { fixture.calls.push({ action: 'open-control' }); window.postMessage({ __bilismoothFloating: 'opened', id: event.data.id, ok: !fixture.openError, error: fixture.openError }, location.origin); } });
@@ -181,7 +181,12 @@ test('quick controls preserve save failure, shared choice keyboard behavior and 
     await host.locator('#bs-route').click(); await page.keyboard.press('Escape');
     assert.equal(await host.locator('.bs-choice-layer[data-state=open]').count(), 0);
     assert.equal(await host.getAttribute('data-expanded'), 'true', 'first Escape closes only the choice');
-    await choose(host, 'auto'); await host.locator('#bs-reset').click(); await host.locator('#bs-retry').click();
+    await choose(host, 'auto'); await host.locator('#bs-reset').click();
+    const beforeTest = await page.evaluate(() => structuredClone(fixture.state.config));
+    await host.locator('#bs-retry').click();
+    assert.equal(await host.locator('#bs-retry').textContent(), '测试其他线路');
+    assert.equal(await host.locator('#bs-retry').isDisabled(), true);
+    assert.deepEqual(await page.evaluate(() => fixture.state.config), beforeTest);
     await host.locator('[data-action=dashboard]').click();
     await page.waitForFunction(() => fixture.calls.some(row => row.action === 'open-control'));
     assert.ok(await page.evaluate(() => fixture.calls.some(row => row.action === 'reset')));
