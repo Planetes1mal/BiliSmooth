@@ -26,7 +26,7 @@
         let session = sessions.get(file.cid);
         if (!session) { session = { cid: file.cid, requiredBps: 0, requestedVideo: null, representations: new Map() }; sessions.set(file.cid, session); }
         session.representations.set(file.key, { ...file, id: track.id, kind: track.kind, bandwidth: track.bandwidth,
-          codecs: track.codecs, codecId: track.codecId, urls });
+          codecs: track.codecs, codecId: track.codecId, nativeHost: policy.describe(track.url).host, urls });
         currentCid = file.cid;
       }
       return current();
@@ -38,7 +38,7 @@
       if (!representation) return null;
       currentCid = representation.cid;
       if (representation.kind === 'video') {
-        const session = current(); session.requestedVideo = representation.key;
+        const session = current(); session.requestedVideo = representation.key; session.nativeHost = representation.nativeHost;
         session.requiredBps = Math.max(session.requiredBps, representation.bandwidth);
       }
       return representation;

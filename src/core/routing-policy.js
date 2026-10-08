@@ -65,8 +65,8 @@
     // every transforming intent without coupling their matching implementations.
     const intents = [
       { id: 'selected-route', rank: 10, format: 'direct', authority: () => config.pcdnHost,
-        accepts: facts => facts.shared || facts.relaySource || config.rewriteAkamai && facts.international
-          || config.mode === 'force' && (facts.distribution || facts.international) },
+        accepts: facts => facts.shared || facts.relaySource || config.selection === 'fixed' && (config.rewriteAkamai && facts.international
+          || config.mode === 'force' && (facts.distribution || facts.international)) },
       { id: 'compatibility-relay', rank: 20, format: 'relay', authority: () => config.proxyHost,
         accepts: (facts, address) => facts.relaySource && (config.mcdnStrategy === 'proxy-all'
           || config.mcdnStrategy === 'proxy-v1' && address.resourceFormat) },
@@ -114,29 +114,17 @@
     }
     return found;
   }
-  const representations = [
-    ['dash', 'video'], ['dash', 'audio'], ['dash', 'dolby', 'audio'], ['dash', 'flac', 'audio'], ['durl']
-  ];
   function createPolicy(value) {
     const config = Settings.normalize(value), route = createPlanner(config), active = config.enabled && config.mode !== 'off';
     function describe(raw) { return describeAddress(readAddress(raw), config); }
-    function alternatives(raw, hosts) {
-      const address = readAddress(raw);
-      if (!address?.media || address.live || address.tags.has('international')) return [];
-      return [...new Set(hosts)].filter(host => Settings.isCdnHost(host) && host !== address.authority)
-        .map(host => renderers.direct(address, host));
-    }
-    function prepare(input, { ranking } = {}) {
-      if (!input || typeof input !== 'object') return { value: input, changed: false, rewrites: [], sampleUrl: null };
+    function prepare(input) {
+      if (!input || typeof input !== 'object') return { value: input, changed: false, rewrites: [] };
       const copy = graphCopy(input), nodes = objects(copy, config.maxDepth), rewrites = [];
-      const pool = ranking?.length ? ranking : config.candidatePool;
-      let changed = false, sampleUrl = null;
+      let changed = false;
       for (const node of nodes) {
         for (const key of Object.keys(node)) if (typeof node[key] === 'string') {
           const result = route(node[key]);
           if (result.changed) { node[key] = result.url; rewrites.push(result); changed = true; }
-          const address = readAddress(node[key]);
-          if (!sampleUrl && address?.media && ['distribution', 'international', 'shared'].some(tag => address.tags.has(tag))) sampleUrl = node[key];
         }
         if (!active) continue;
         const entries = node.url_info;
@@ -151,27 +139,7 @@
           }
         }
       }
-      if (active && config.selection === 'auto') {
-        const processed = new Set();
-        for (const node of nodes) for (const path of representations) {
-          const group = path.reduce((parent, key) => parent?.[key], node);
-          for (const item of Array.isArray(group) ? group : group && typeof group === 'object' ? [group] : []) {
-            if (!item || processed.has(item)) continue; processed.add(item);
-            for (const [primary, backup] of [['baseUrl', 'backupUrl'], ['base_url', 'backup_url'], ['url', 'backup_url']]) {
-              if (typeof item[primary] !== 'string') continue;
-              const generated = alternatives(item[primary], pool);
-              if (!generated.length) continue;
-              const previous = Array.isArray(item[backup]) ? item[backup] : [];
-              const addresses = new Set();
-              // Keep the player's fallbacks first, including separately signed URLs.
-              for (const list of [previous, generated]) for (const raw of list) if (addresses.size < 8) addresses.add(raw);
-              const next = [...addresses];
-              if (previous.length !== next.length || previous.some((raw, index) => raw !== next[index])) { item[backup] = next; changed = true; }
-            }
-          }
-        }
-      }
-      return { value: changed ? copy : input, changed, rewrites, sampleUrl };
+      return { value: changed ? copy : input, changed, rewrites };
     }
     return Object.freeze({ route, prepare, describe });
   }

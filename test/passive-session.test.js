@@ -7,7 +7,7 @@ const raw = `https://${A}/upgcxcode/1/video.m4s?sign=TOP_SECRET`, audio = `https
 const payload = { data: { dash: { video: [{ id: 120, baseUrl: raw, backupUrl: [], width: 3840, height: 2160, frame_rate: '60' }], audio: [{ id: 1, baseUrl: audio }] } } };
 function harness(options = {}) {
   let clock = 100000, serial = 0, emit, installedConfig, config, kernelOptions, calls = [], reloads = 0;
-  const kernelState = { ranking: [], probeSamples: [] };
+  const kernelState = { delivery: { status: 'native', nativeHost: A, activeHost: null, nextTestAt: 0, canTest: false, comparedHosts: [] } };
   const timers = new Map(), messages = [], store = new Map(Object.entries(options.storage || {}));
   const video = emitter({ paused: false, ended: false, seeking: false, currentTime: 1, readyState: 4, videoWidth: 3840, videoHeight: 2160,
     playbackRate: 2, buffered: { length: 1, start: () => 0, end: () => 30 }, getVideoPlaybackQuality: () => ({ totalVideoFrames: 0, droppedVideoFrames: 0 }), ...options.video });
@@ -28,7 +28,7 @@ function harness(options = {}) {
     setTimeout: (fn, delay) => { timers.set(++serial, { fn, at: clock + delay }); return serial; }, clearTimeout: id => timers.delete(id),
     BiliSmoothPlaybackKernel: { create(options) { kernelOptions = options; emit = options.onEvent; config = options.config; installedConfig = { ...config }; emit({ type: 'config', config });
       return { setConfig(next) { calls.push('config'); config = next; emit({ type: 'config', config }); }, getState: () => kernelState,
-        getFlags: () => ({ needReload: !!kernelState.needReload, probing: !!kernelState.probing }),
+        getFlags: () => ({ needReload: !!kernelState.needReload, delivery: kernelState.delivery }),
         resetNetwork() { calls.push('reset'); }, retry() { calls.push('retry'); return true; }, rewriteUrl: value => value }; } } });
   scope.globalThis = scope;
   const context = vm.createContext(scope);
@@ -41,17 +41,17 @@ function harness(options = {}) {
     message, advance(ms) { clock += ms; for (const [id, timer] of [...timers]) { if (timer.interval) timer.fn(); else if (timer.at <= clock) { timers.delete(id); timer.fn(); } } }, reloads: () => reloads };
 }
 
-test('compact snapshot reads cached observations without scanning players or constructing rankings', () => {
+test('compact snapshot reads cached observations and delivery flags without constructing session records', () => {
   const h = harness();
   h.document.querySelectorAll = () => { throw Error('compact view must not scan DOM'); };
-  Object.defineProperty(h.kernelState, 'ranking', { get() { throw Error('compact view must not load ranking'); } });
+  Object.defineProperty(h.kernelState, 'session', { get() { throw Error('compact view must not copy session records'); } });
   const view = h.api.getViewState();
   assert.equal(view.media.present, true); assert.equal(view.bufferWallSeconds, 14.5);
-  assert.equal(view.observedAt, 100000); assert.equal(view.events, undefined); assert.equal(view.ranking, undefined);
+  assert.equal(view.observedAt, 100000); assert.equal(view.events, undefined); assert.equal(view.session, undefined);
   view.config.floatingFields.length = 0; view.media.frameHealth.state = 'modified';
   assert.equal(h.api.getConfig().floatingFields.length, 3); assert.notEqual(h.api.getViewState().media.frameHealth.state, 'modified');
-  h.kernelState.needReload = true; h.kernelState.probing = true;
-  assert.equal(h.api.getViewState().needReload, true); assert.equal(h.api.getViewState().probing, true);
+  h.kernelState.needReload = true; h.kernelState.delivery.status = 'testing';
+  assert.equal(h.api.getViewState().needReload, true); assert.equal(h.api.getViewState().delivery.status, 'testing');
 });
 
 test('site gates block manual recovery while preserving shared settings and automatic network resets', () => {
@@ -128,17 +128,6 @@ test('late authoritative changes flag delivered manifests for refresh and preser
   assert.equal(state.config.enabled, false); assert.equal(state.config.theme, 'dark'); assert.equal(state.config.mcdnStrategy, 'proxy-v1');
   assert.ok(state.reloadReasons.includes('startup-config'));
 });
-test('cached or early automatic ranking survives first storage handshake but never overrides stored fixed selection', () => {
-  const h = harness(); h.kernelState.ranking = [B, A];
-  h.emit({ type: 'config', config: { selection: 'auto', pcdnHost: B } });
-  h.message({ __bilismoothConfig: 'config', config: { selection: 'auto', pcdnHost: A } });
-  assert.equal(h.api.getState().targetHost, B);
-  assert.equal(h.messages.filter(row => row.__bilismoothConfig === 'save').at(-1).config.pcdnHost, B);
-  const fixed = harness(); fixed.kernelState.ranking = [B, A];
-  fixed.emit({ type: 'config', config: { selection: 'auto', pcdnHost: B } });
-  fixed.message({ __bilismoothConfig: 'config', config: { selection: 'fixed', pcdnHost: A } });
-  assert.equal(fixed.api.getState().targetHost, A); assert.equal(fixed.api.getState().config.selection, 'fixed');
-});
 test('fixed route preserves mode and exposes a storage acknowledgement', async () => {
   const h = harness({ noPlayer: true }); h.message({ __bilismoothConfig: 'config', config: {} });
   assert.equal(h.api.applyRoute(B), true); assert.equal(h.api.getConfig().selection, 'fixed'); assert.equal(h.api.getConfig().mode, 'bad-only');
@@ -150,13 +139,13 @@ test('fixed route preserves mode and exposes a storage acknowledgement', async (
   await h.api.flushSettings(); assert.equal(h.api.getState().settingsSave.status, 'saved');
   assert.equal(h.reloads(), 0, 'the control bridge owns reload after responding to the caller');
 });
-test('request target, actual video bytes and playback recovery remain separate; probe/audio traffic never becomes video speed', () => {
+test('request target, actual video bytes and playback recovery remain separate; race/audio traffic never becomes video speed', () => {
   const h = harness(); h.emit({ type: 'payload', original: payload, prepared: payload, source: 'global' });
   h.emit({ type: 'request', id: 'v', originalUrl: raw, url: raw, host: A, transport: 'fetch', startedAt: 100000 });
   assert.equal(h.api.getState().requestedHost, A); assert.equal(h.api.getState().actualHost, null);
   h.emit({ type: 'transfer', id: 'v', status: 200, outcome: 'response' });
   assert.equal(h.api.getDiagnostics().requests.length, 1); assert.equal(h.api.getState().lastMbps, null);
-  h.emit({ type: 'probe', host: A, bytes: 786432, mbps: 100 });
+  h.emit({ type: 'race', reason: 'finished', host: A, bytes: 786432 });
   h.emit({ type: 'request', id: 'a', originalUrl: audio, url: audio, host: B, transport: 'xhr', startedAt: 100000 });
   h.advance(1000); h.emit({ type: 'progress', id: 'a', status: 206, bytes: 10000, responseUrl: audio });
   assert.equal(h.api.getState().lastMbps, null); assert.equal(h.api.getState().audioHost, B);
@@ -238,7 +227,7 @@ test('out-of-order parallel completions include the earlier observed request int
   assert.equal(h.api.getViewState().lastMbps, 12, '1.5MB over one shared observed second');
 });
 
-test('connection estimate updates never reset the network or restart its probe round', () => {
+test('connection estimates alone do not reset network records', () => {
   const h = harness({ connection: { type: 'wifi', effectiveType: '4g', rtt: 50, downlink: 10, saveData: false } });
   const connection = h.scope.navigator.connection;
   for (const patch of [{ rtt: 100 }, { downlink: 3 }, { effectiveType: '3g' }, { saveData: true }, {}, {}]) {
@@ -279,7 +268,7 @@ test('missing response URLs and unknown status cannot turn the document host int
   h.advance(1000); h.emit({ type: 'progress', id: 'v', status: 206, bytes: 200000, responseUrl: '' });
   assert.equal(h.api.getState().actualHost, null); assert.equal(h.api.getState().requestedHost, A);
 });
-test('passive stall observations never ask kernel to rotate, validate Range, expire or roll back requests', () => {
+test('passive stall observations never ask the kernel to dispatch or terminate requests', () => {
   const h = harness(); h.video.readyState = 2; h.video.emit('waiting'); h.advance(10000);
   assert.equal(h.api.getState().stalls, 1); assert.deepEqual(h.calls, []);
   h.document.hidden = true; h.document.emit('visibilitychange');
@@ -400,14 +389,13 @@ test('failed transfers preserve request correlation and target without inventing
 
 test('critical timeline survives segment traffic eviction and exports bounded retention and observations', () => {
   const h = harness(); h.video.readyState = 2; h.video.emit('waiting');
-  h.emit({ type: 'stall-timer', action: 'kept', reason: 'already-scheduled', at: 100000, deadlineAt: 102500, dueInMs: 2500,
-    readyState: 2, paused: false, seeking: false, hidden: false, playhead: 1, url: raw });
+  h.emit({ type: 'race', reason: 'finished', at: 100000, host: A, bytes: 786432, url: raw });
   for (let i = 0; i < 300; i++) h.emit({ type: 'request', id: 'reference-' + i, originalUrl: raw, url: raw, host: A });
   assert.equal(h.api.getState().events.length, 200);
   let report = h.api.getDiagnostics();
   assert.ok(report.events.some(row => row.type === 'stall'));
-  const timer = report.events.find(row => row.type === 'stall-timer');
-  assert.equal(timer.action, 'kept'); assert.equal(timer.deadlineAt, 102500); assert.equal(timer.hidden, false);
+  const race = report.events.find(row => row.type === 'race');
+  assert.equal(race.reason, 'finished'); assert.equal(race.host, A); assert.equal(race.bytes, 786432);
   assert.ok(report.retention.droppedEvents >= 100);
   for (let i = 0; i < 810; i++) { h.emit({ type: 'player-event', source: 'waiting' }); h.advance(1000); }
   report = h.api.getDiagnostics();
@@ -551,21 +539,6 @@ test('first compositor submission can be observed before play while explicit pau
   paused.video.emit('pause'); paused.presentFrame(50, { presentedFrames: 1, mediaTime: 0 });
   assert.equal(paused.api.getState().startup.firstPresentedFrameAt, null);
   assert.equal(paused.api.getState().startup.phase, 'paused'); assert.deepEqual(h.calls, []);
-});
-
-test('effective ranking and short-lived video feedback are separately whitelisted from probe evidence', () => {
-  const h = harness();
-  h.kernelState.ranking = [A, B]; h.kernelState.effectiveRanking = [B, A, raw, 'attacker.example'];
-  h.kernelState.probeSamples = [{ host: A, bytes: 10000, mbps: 10 }];
-  h.kernelState.playbackFeedback = { version: 1, url: raw, rows: [
-    { host: A, stableAt: 90000, timeouts: [-20000, 99000, raw], url: raw },
-    { host: B, stableAt: 0, timeouts: [] }, { host: 'attacker.example', stableAt: 90000, timeouts: [99000] }] };
-  const s = h.api.getState(), row = s.ranking.find(item => item.host === A);
-  assert.equal(s.effectiveRanking.join(','), [B, A].join(','));
-  assert.equal(row.recentVideoTimeouts, 1); assert.equal(row.lastStableAt, 90000);
-  assert.equal(row.successes, 1); assert.equal(row.failures, 0); assert.equal(row.evidence, 'network-probe');
-  assert.equal(s.playbackFeedback.rows.length, 2); assert.equal(s.playbackFeedback.rows[0].timeouts.length, 1);
-  assert.doesNotMatch(JSON.stringify(h.api.getDiagnostics()), /TOP_SECRET|SECRET_AUDIO|attacker|https?:|\?sign/);
 });
 
 test('a queued rVFC timestamp behind the latest observation does not erase established presentation evidence', () => {

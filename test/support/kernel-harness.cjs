@@ -45,7 +45,7 @@ module.exports = function load(options = {}) {
     XMLHttpRequest: XHR, document, navigator: emit({ language: 'en-US', onLine: true, connection: emit({}) }),
     location: { href: 'https://www.bilibili.com/video/BVcontract', origin: 'https://www.bilibili.com', pathname: '/video/BVcontract', reload() {} },
     performance: { now: () => time }, console: { info() {}, warn() {}, error() {} },
-    localStorage: { getItem: key => options.storageGet?.(key, time) ?? store.get(key) ?? null,
+    localStorage: { get length() { return store.size; }, key: index => [...store.keys()][index] ?? null, getItem: key => options.storageGet?.(key, time) ?? store.get(key) ?? null,
       setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
     setTimeout(fn, delay) { timers.set(++serial, { fn, at: time + delay }); return serial; }, clearTimeout: id => timers.delete(id),
     setInterval(fn, delay) { timers.set(++serial, { fn, at: time + delay, interval: delay }); return serial; }, clearInterval: id => timers.delete(id), postMessage() {} });

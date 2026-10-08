@@ -76,7 +76,7 @@
     }
     function processTiming(entries) {
       for (const metric of entries) {
-        if (metric.initiatorType && metric.initiatorType !== 'fetch' || options.ignoreTiming?.(metric)) continue;
+        if (metric.initiatorType && metric.initiatorType !== 'fetch') continue;
         const group = [...pending.values()].filter(item => item.token.url === metric.name && metric.startTime >= item.token.startedAt - 3 && metric.startTime <= item.token.startedAt + 20);
         if (group.length > 1) {
           for (const item of group) { removeFetch(item); transfer(item.token, { outcome: 'unverified', evidence: 'resource-timing', evidenceReason: 'ambiguous-request', status: item.status || 0 }); }

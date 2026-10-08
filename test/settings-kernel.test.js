@@ -36,7 +36,7 @@ function load() {
     Intl: { DateTimeFormat: () => ({ resolvedOptions: () => ({ timeZone: 'America/New_York' }) }) },
     navigator: { language: 'en-US', connection: emitter({}) }, document, XMLHttpRequest: XHR, fetch: nativeFetch,
     location: { href: 'https://www.bilibili.com/video/BVstartup', origin: 'https://www.bilibili.com', reload() {} },
-    localStorage: { getItem: key => store.get(key) || null, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
+    localStorage: { get length() { return store.size; }, key: index => [...store.keys()][index] ?? null, getItem: key => store.get(key) || null, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
     postMessage: message => messages.push(JSON.parse(JSON.stringify(message))),
     setInterval: fn => { timers.set(++serial, fn); return serial; }, clearInterval: id => timers.delete(id),
     setTimeout: fn => { timers.set(++serial, fn); return serial; }, clearTimeout: id => timers.delete(id),
@@ -58,7 +58,7 @@ function load() {
 async function assertNativeDispatch(h, host) {
   const response = await h.scope.fetch(peer);
   const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', peer); xhr.send();
-  assert.equal(h.dispatches.length, 2, 'cached ranking must not cause probe dispatches');
+  assert.equal(h.dispatches.length, 2, 'startup does not cause probe dispatches');
   for (const call of h.dispatches) assert.equal(new URL(call.url).hostname, host);
   assert.equal(response.bodyUsed, false);
   assert.equal(await response.text(), 'native media bytes');
@@ -66,35 +66,34 @@ async function assertNativeDispatch(h, host) {
   assert.equal(h.api.getState().actualHost, null, 'dispatch and headers alone are not byte evidence');
 }
 
-test('initial auto storage handshake preserves the real cached winner and dispatches PCDN through it', async () => {
+test('initial automatic storage handshake ignores removed ranking and preserves authoritative PCDN preferences', async () => {
   const h = load();
-  assert.equal(h.api.getConfig().pcdnHost, B);
-  assert.equal(h.kernel.getState().ranking[0], B);
+  assert.equal(h.api.getConfig().pcdnHost, A);
+  assert.equal(h.store.has(h.rankKey), false);
   assert.equal(h.api.getState().startupReady, false);
   assert.equal(h.dispatches.length, 0);
   assert.equal(h.messages.filter(row => row.__bilismoothConfig === 'save').length, 0);
   h.message(h.scope.BiliSmoothSettings.normalize({ selection: 'auto', pcdnHost: A, theme: 'dark' }));
   assert.equal(h.api.getState().startupReady, true);
-  assert.equal(h.api.getConfig().pcdnHost, B);
+  assert.equal(h.api.getConfig().pcdnHost, A);
   assert.equal(h.api.getConfig().theme, 'dark');
-  assert.equal(h.kernel.getConfig().pcdnHost, B);
-  assert.equal(h.messages.filter(row => row.__bilismoothConfig === 'save').length, 1);
-  assert.equal(h.messages.find(row => row.__bilismoothConfig === 'save').config.pcdnHost, B);
-  assert.equal(JSON.parse(h.store.get('bilismooth.startup.v4')).pcdnHost, B);
-  await assertNativeDispatch(h, B);
+  assert.equal(h.kernel.getConfig().pcdnHost, A);
+  assert.equal(h.messages.filter(row => row.__bilismoothConfig === 'save').length, 0);
+  assert.equal(JSON.parse(h.store.get('bilismooth.startup.v4')).pcdnHost, A);
+  await assertNativeDispatch(h, A);
   assert.doesNotMatch(JSON.stringify(h.api.getDiagnostics()), /IN_MEMORY_ONLY|\?sign/);
   h.kernel.destroy();
 });
 
-test('initial fixed storage preference outranks cached automatic selection and dispatches its node', async () => {
+test('initial fixed storage preference controls dispatch without restoring old automatic selection', async () => {
   const h = load();
-  assert.equal(h.api.getConfig().pcdnHost, B);
+  assert.equal(h.api.getConfig().pcdnHost, A);
   h.message(h.scope.BiliSmoothSettings.normalize({ selection: 'fixed', pcdnHost: A }));
   assert.equal(h.api.getConfig().selection, 'fixed');
   assert.equal(h.api.getConfig().pcdnHost, A);
   assert.equal(h.kernel.getConfig().pcdnHost, A);
   assert.equal(h.messages.filter(row => row.__bilismoothConfig === 'save').length, 0);
-  assert.equal(h.api.getState().needReload, true, 'already delivered cached-target manifests need refresh');
+  assert.equal(h.api.getState().needReload, true, 'an already delivered manifest precedes the fixed preference');
   await assertNativeDispatch(h, A);
   h.kernel.destroy();
 });
@@ -112,7 +111,7 @@ test('adapter reinjection and repeated create retain a single kernel and one net
   assert.equal(h.scope.XMLHttpRequest.prototype.open, hooks.open); assert.equal(h.scope.XMLHttpRequest.prototype.send, hooks.send);
   assert.equal(h.scope.XMLHttpRequest.prototype.setRequestHeader, hooks.header);
   h.message(h.scope.BiliSmoothSettings.normalize({ selection: 'auto', pcdnHost: A }));
-  await assertNativeDispatch(h, B);
+  await assertNativeDispatch(h, A);
   assert.equal(h.api.getState().events.filter(event => event.type === 'request').length, 2);
   h.kernel.destroy();
 });

@@ -14,7 +14,7 @@
   const hostOf = raw => { try { return typeof raw === 'string' && /^https?:\/\//i.test(raw) ? new URL(raw).hostname : null; } catch { return null; } };
   const catalog = scope.BiliSmoothCatalog.create(), frames = scope.BiliSmoothFrames.create();
   const listeners = new Set(), requests = new Map(), reloadReasons = new Set();
-  let config = settings.normalize(), kernel = null, startupReady = false, observedPayload = false, configuring = true, earlyEdits = {};
+  let config = settings.normalize(), kernel = null, startupReady = false, observedPayload = false, earlyEdits = {};
   let player = null, playerListeners = [], frameCallback = null, waiting = false, suspended = false;
   let lastPosition = null, lastMovedAt = now(), graceUntil = 0, mediaGeneration = 0, networkEpoch = 0;
   let actualHost = null, requestedHost = null, audioHost = null, lastMbps = null, lastTransferAt = 0;
@@ -154,23 +154,18 @@
     const previous = config;
     if (!authoritative && !startupReady) earlyEdits = { ...earlyEdits, ...settings.patch(patch) };
     if (authoritative) patch = { ...patch, ...unsavedEdits, ...(!startupReady ? earlyEdits : {}) };
-    const adoptRankedTarget = authoritative && !startupReady && config.selection === 'auto' && patch?.selection !== 'fixed' &&
-      !earlyEdits.pcdnHost && kernel?.getState().ranking?.length > 0;
-    if (adoptRankedTarget) patch = { ...patch, pcdnHost: config.pcdnHost };
     config = settings.normalize({ ...config, ...settings.patch(patch) });
     if (config.p2pGuard !== installedP2pGuard) reloadReasons.add('p2p-guard'); else reloadReasons.delete('p2p-guard');
-    // Already delivered manifests cannot be un-enriched or switched back in place.
+    // Already delivered manifests cannot be switched back in place.
     if (observedPayload && routingKeys.some(key => config[key] !== previous[key])) reloadReasons.add('playinfo-config');
     if (authoritative && !startupReady) {
       startupReady = true;
       if (observedPayload && routingKeys.some(key => config[key] !== previous[key])) reloadReasons.add('startup-config');
     }
     if (authoritative) reloadReasons.delete('storage-read-failed');
-    configuring = true;
-    try { kernel?.setConfig(config); } finally { configuring = false; }
+    kernel?.setConfig(config);
     const changed = Object.fromEntries(Object.entries(config).filter(([key, value]) => !sameSetting(previous[key], value)));
     startupCache(); if (!authoritative) persist({ ...settings.patch(patch), ...changed });
-    else if (adoptRankedTarget) persist({ pcdnHost: config.pcdnHost });
     notify(); return clone(config);
   }
   function endEpisode(outcome) {
@@ -227,11 +222,7 @@
       log('playinfo', { source: event.source }); return;
     }
     if (event.type === 'config') {
-      // Automatic ranking / rotation changes the target; it must persist without calling setConfig again.
-      const previous = config;
-      config = settings.normalize({ ...config, ...settings.patch(event.config) });
-      if (!configuring && startupReady) persist(Object.fromEntries(Object.entries(config).filter(([key, value]) => !sameSetting(previous[key], value))));
-      notify(); return;
+      config = settings.normalize({ ...config, ...settings.patch(event.config) }); notify(); return;
     }
     if (event.type === 'request') {
       const track = catalog.request(event.originalUrl) || catalog.request(event.url);
@@ -276,7 +267,7 @@
       if (event.outcome === 'response') { entry.status = event.status; entry.headersReceived = true; }
       return;
     }
-    if (event.type === 'recovery-attempt') counters.switches++;
+    if (event.type === 'switch' && event.scope === 'video') counters.switches++;
     log(event.type, event); notify();
   }
   function resetSpeed() {
@@ -309,7 +300,6 @@
     getPlaybackEvidence: () => ({ player, sampledAt: playbackSampledAt, frameHealth: { ...current.frameHealth },
       playback: current.playback, buffer: bufferSeconds(), rate: player?.playbackRate || 1,
       mediaGeneration, startupPending: startupPending() }) });
-  configuring = false;
   function resetNetwork(reason = 'manual') {
     refresh(); if (availability && reason === 'manual') return false;
     networkTransport = connectionType();
@@ -465,42 +455,28 @@
   function viewState() {
     const buffer = bufferSeconds(), rate = player?.playbackRate || 1, flags = kernel.getFlags?.() || {};
     // Read the session's existing observations only. Compact UI must not cause
-    // another player scan, frame sample, rank construction or diagnostic clone.
+    // another player scan, frame sample or diagnostic clone.
     return { version: VERSION, media: { ...current, frameHealth: { ...current.frameHealth } }, availability: availability && { ...availability }, config: clone(config),
       status: current.playback === 'playing' && current.frameHealth.state === 'healthy' ? 'smooth' : current.playback,
       observedAt, hidden: !!document.hidden, videoMeta: { ...videoMeta }, rate, buffer,
       bufferMediaSeconds: buffer, bufferWallSeconds: bufferWallSeconds(buffer),
-      actualHost, requestedHost, targetHost: config.pcdnHost, audioHost, lastMbps, lastTransferAt, speedObservedAt,
+      actualHost, requestedHost, targetHost: config.selection === 'fixed' ? config.pcdnHost : flags.delivery?.activeHost || requestedHost, audioHost, lastMbps, lastTransferAt, speedObservedAt,
       networkEpoch, mediaGeneration, startupReady, settingsSave: { ...settingsSave },
-      probing: !!flags.probing, needReload: reloadReasons.size > 0 || !!flags.needReload,
+      delivery: flags.delivery, needReload: reloadReasons.size > 0 || !!flags.needReload,
       reloadReasons: [...reloadReasons], allowedHosts: [...settings.fixedHosts] };
   }
   function state() {
-    refresh(); const k = kernel.getState(), rank = k.ranking || [], buffer = bufferSeconds(), rate = player?.playbackRate || 1;
-    const effectiveRanking = [...new Set((Array.isArray(k.effectiveRanking) ? k.effectiveRanking : []).filter(host => settings.candidatePool.includes(host)))];
-    const playbackFeedback = k.playbackFeedback?.version === 1 ? { version: 1,
-      rows: (Array.isArray(k.playbackFeedback.rows) ? k.playbackFeedback.rows : []).filter(row => settings.candidatePool.includes(row?.host)).slice(0, 16).map(row => ({
-        host: row.host, stableAt: Number.isFinite(row.stableAt) && row.stableAt > 0 ? row.stableAt : 0,
-        failedAt: Number.isFinite(row.failedAt) && row.failedAt > 0 ? row.failedAt : 0,
-        timeouts: (Array.isArray(row.timeouts) ? row.timeouts : []).filter(at => Number.isFinite(at) && at > 0).slice(-16) })) } : null;
+    refresh(); const k = kernel.getState(), buffer = bufferSeconds(), rate = player?.playbackRate || 1;
     const totals = { ...counters, totalStallMs: counters.totalStallMs + (activeEpisode?.observedStallMs || 0) };
-    const ranking = [...new Set([...rank.map(row => typeof row === 'string' ? row : row.host), ...settings.candidatePool])].map(host => {
-      const row = (k.probeSamples || []).find(sample => sample.host === host) || {};
-      const feedback = playbackFeedback?.rows.find(item => item.host === host);
-      return { host, ...row, mbps: Number.isFinite(row.mbps) ? row.mbps : null, samples: row.bytes > 0 ? 1 : 0,
-        successes: row.bytes > 0 ? 1 : 0, failures: row.error ? 1 : 0, eligible: effectiveRanking.includes(host), cooldownSec: 0, evidence: 'network-probe',
-        recentVideoTimeouts: feedback?.timeouts.filter(at => Date.now() >= at && Date.now() - at < 120000).length || 0,
-        lastStableAt: feedback?.stableAt || null };
-    });
     return { ...viewState(), kernelVersion: 'playback-2.6.0',
       reason: current.playback === 'frozen' ? 'frame-stalled' : '', rate, buffer,
       bufferMediaSeconds: buffer, bufferWallSeconds: bufferWallSeconds(buffer),
       startup: startupSnapshot(), startupHistory: clone(startupHistory), session: k.session,
-      actualHost, requestedHost, targetHost: config.pcdnHost, audioHost, lastMbps, lastTransferAt, speedObservedAt,
-      probing: !!k.probing, probedAt: k.probedAt || 0, probeBytes: k.probeBytes || 0, rewriteCount: k.rewriteCount || 0,
-      recoveryAttempts: k.recoveries || 0, ...totals, counters: totals, ranking, effectiveRanking, playbackFeedback, allowedHosts: [...settings.fixedHosts],
+      actualHost, requestedHost, audioHost, lastMbps, lastTransferAt, speedObservedAt,
+      rewriteCount: k.rewriteCount || 0,
+      recoveryAttempts: k.session?.switches.length || 0, ...totals, counters: totals, allowedHosts: [...settings.fixedHosts],
       networkEpoch, mediaGeneration, startupReady, settingsSave: { ...settingsSave }, needReload: reloadReasons.size > 0 || !!k.needReload, reloadReasons: [...reloadReasons],
-      transaction: null, demand: { known: false, requiredMbps: null }, audioRecovery: null,
+      demand: { known: !!k.session?.requiredBps, requiredMbps: k.session?.requiredBps ? k.session.requiredBps / 1000000 : null },
       history: [...bufferHistory], speedHistory: [...speedHistory], speedSamples: clone(speedSamples), sampledAt, events: clone(events) };
   }
   function tick() {
@@ -513,7 +489,7 @@
       playback: current.playback, frameHealth: current.frameHealth.state, readyState: player?.readyState ?? null,
       hidden: document.hidden, buffer: bufferSeconds(), bufferMediaSeconds: bufferSeconds(),
       bufferWallSeconds: bufferWallSeconds(),
-      startupSequence: startup.sequence, startupPhase: startup.phase, actualHost, requestedHost, targetHost: config.pcdnHost,
+      startupSequence: startup.sequence, startupPhase: startup.phase, actualHost, requestedHost, targetHost: config.selection === 'fixed' ? config.pcdnHost : kernel.getFlags().delivery?.activeHost || requestedHost,
       videoBytes: counters.videoBytes, audioBytes: counters.audioBytes, networkEpoch, mediaGeneration });
     if (observations.length > 600) { observations.shift(); droppedObservations++; }
   }
@@ -554,7 +530,7 @@
   scope.addEventListener('online', () => resetNetwork('online'));
   connection?.addEventListener('change', () => {
     // This event also reports throughput/RTT estimates. Those measurements must
-    // not restart probes or discard playback evidence for the current network.
+    // not discard playback evidence for the current network.
     const previous = networkTransport; networkTransport = connectionType();
     if (previous && networkTransport && previous !== networkTransport) resetNetwork('connection-change');
   });

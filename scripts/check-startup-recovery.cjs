@@ -33,7 +33,7 @@ open(sys.argv[2],'wb').write(k.private_bytes(serialization.Encoding.PEM,serializ
 }
 
 function html(metadata, init, clusterOffset, synthetic = false) {
-  const mediaPath = synthetic ? '/upgcxcode/startup/101-1-30016.m4s' : '/upgcxcode/startup/video.m4s';
+  const mediaPath = '/upgcxcode/startup/101-1-30016.m4s';
   return `<!doctype html><html><head><meta charset="utf-8"><title>Isolated native startup recovery</title></head>
 <body><button id="start">Start native startup fixture</button><div class="bpx-player-container"><video muted playsinline style="width:640px;height:360px"></video></div>
 <script>(()=>{
@@ -60,10 +60,9 @@ function request(attempt=0){
  for(const [name,handler] of Object.entries(handlers))if(synthetic)xhr['on'+name]=handler;else xhr.addEventListener(name,handler);
  if(synthetic){xhr.onabort=()=>state.errors.push('player abort callback was not detached');record.readyStates=[];xhr.onreadystatechange=()=>record.readyStates.push(xhr.readyState);}
  xhr.send();
- if(synthetic&&attempt===0)setTimeout(()=>{BiliSmoothPlaybackKernel.create().testRoutes();},1000);
 }
 async function start(){if(state.started)return;state.started=true;state.startedAt=performance.now();
- const payload={data:{dash:{video:[{id:80,baseUrl:'https://${A}${mediaPath}',backupUrl:[],width:640,height:360,frame_rate:'30'}]}}};
+ const payload={data:{dash:{video:[{id:80,bandwidth:900000,baseUrl:'https://${A}${mediaPath}',backupUrl:[],width:640,height:360,frame_rate:'30'}]}}};
  window.__playinfo__=payload;source=new MediaSource();video.src=URL.createObjectURL(source);
  await new Promise(resolve=>source.addEventListener('sourceopen',resolve,{once:true}));buffer=source.addSourceBuffer(${JSON.stringify(metadata.videoType)});source.duration=${metadata.durationSeconds};
  video.requestVideoFrameCallback(frame);const metadataReady=new Promise(resolve=>video.addEventListener('loadedmetadata',resolve,{once:true}));await append(init);await metadataReady;
@@ -76,7 +75,7 @@ window.startupFixture={state,snapshot:()=>({at:performance.now(),currentTime:vid
 }
 
 async function run(adaptive, directory, server, metadata, video, clusterOffset, synthetic = false) {
-  const name = synthetic ? 'synthetic-first-fragment' : adaptive ? 'adaptive' : 'legacy-control', run = { name, adaptive, synthetic, pageErrors: [], networkErrors: [] };
+  const name = synthetic ? 'synthetic-first-fragment' : adaptive ? 'adaptive' : 'original-control', run = { name, adaptive, synthetic, pageErrors: [], networkErrors: [] };
   const profile = await fs.mkdtemp(path.join(directory, name + '-')), extension = path.join(profile, 'extension');
   await fs.cp(path.join(root, 'dist/extension'), extension, { recursive: true });
   await assertBuildMatches(root, extension);
@@ -104,7 +103,7 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset, 
     page = await context.newPage(); page.on('pageerror', error => run.pageErrors.push(error.message));
     page.on('requestfailed', request => run.networkErrors.push({ host: new URL(request.url()).hostname, error: request.failure()?.errorText }));
     await page.goto(pageUrl);
-    if (synthetic) {
+    if (adaptive) {
       await page.evaluate(B => localStorage.setItem('bilismooth.delivery-history.v1.America/New_York|en-US', JSON.stringify({ version: 1,
         rows: BiliSmoothSettings.candidatePool.map(host => ({ host, meanBps: host === B ? 1000000 : null, weight: host === B ? 1 : 0,
           measuredAt: host === B ? Date.now() : 0, failedAt: host === B ? 0 : Date.now() })) })), B);
@@ -112,8 +111,7 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset, 
     }
     await page.waitForFunction(() => window.BiliSmoothSession?.getState().startupReady === true, undefined, { timeout: 10000 });
     await page.evaluate(({ A, B, adaptive }) => {
-      localStorage.setItem(BiliSmoothPlaybackKernel.constants.RANK_PREFIX + 'America/New_York|en-US', JSON.stringify({ ranking: [A, B], samples: [], at: Date.now() }));
-      BiliSmoothSession.setConfig({ enabled: true, selection: 'auto', mode: 'force', pcdnHost: A, adaptiveRecovery: adaptive, stallRecovery: true });
+      BiliSmoothSession.setConfig({ enabled: adaptive, selection: 'auto', mode: 'bad-only', pcdnHost: A, stallRecovery: true });
     }, { A, B, adaptive });
     await page.click('#start');
     if (adaptive) await page.waitForFunction(() => startupFixture.state.frames >= 10 || startupFixture.state.errors.length > 0, undefined, { timeout: 18000 });
@@ -177,14 +175,14 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset, 
     check('adaptive: synchronous timeout consumer already observes the replacement target', adaptive.fixture?.requests[0]?.retryTarget === B, adaptive.fixture?.requests);
     check('adaptive: second request reaches replacement and presents native frames', network.some(row => row.name === 'adaptive' && row.host === B && row.outcome === 'complete') && adaptive.final?.frames >= 10);
     check('adaptive: timeout and loadend produce only one recovery attempt', adaptive.final?.diagnostics.recoveryAttempts === 1, adaptive.final?.diagnostics.recoveryAttempts);
-    check('legacy control: same synchronous retry keeps the failed target and still has no frame', legacy.fixture?.requests[0]?.retryTarget === A && legacy.final?.frames === 0 && legacy.final?.diagnostics.recoveryAttempts === 0);
+    check('original control: same synchronous retry keeps its native host and still has no frame', legacy.fixture?.requests[0]?.retryTarget === A && legacy.final?.frames === 0 && legacy.final?.diagnostics.recoveryAttempts === 0);
     check('both runs used identical built script bytes', adaptive.sourceSha256 === legacy.sourceSha256 && adaptive.sourceSha256 === hash(await fs.readFile(path.join(root, 'dist/extension/playback.js'))));
     check('all page requests remained on the local fixture', unexpected.length === 0, unexpected);
   } catch (error) { fatal = error.stack || String(error); check('native startup fixture completes', false, fatal); }
   finally {
     if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     const report = { version: expectedVersion, at: new Date().toISOString(), passed: checks.every(row => row.passed), checks, runs, network, fatal,
-      limits: ['Two disposable headless Chromium MV3 profiles; the signed-in user browser is not accessed.',
+      limits: ['Three disposable headless Chromium MV3 profiles; the signed-in user browser is not accessed.',
         'Native XHR, paused metadata-only MSE startup, partial body timeout, synchronous player retry and rVFC are exercised against a loopback TLS server.',
         'The fixture registers its native timeout listener after open and before send. Consumers registering before open retain their native order and are outside this ordering guarantee.',
         'Generated 640x360 VP8 media does not reproduce real Bilibili CDN routing, signed URLs, 4K decoding or the real player implementation.',

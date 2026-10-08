@@ -12,7 +12,7 @@
   const floatingEntryTypes = Object.freeze(['status-logo', 'logo', 'status', 'speed', 'buffer', 'combined', 'route', 'rate', 'resolution']);
   const defaults = Object.freeze({ schemaVersion: 4, enabled: true, selection: 'auto', mode: 'bad-only',
     pcdnHost: candidatePool[0], candidatePool, mcdnStrategy: 'proxy-all', proxyHost: 'proxy-tf-all-ws.bilivideo.com',
-    portHeuristic: true, stallRecovery: true, adaptiveRecovery: true, rewriteAkamai: false, p2pGuard: false,
+    portHeuristic: true, stallRecovery: true, rewriteAkamai: false, p2pGuard: false,
     lang: 'zh', accent: 'teal', theme: 'system', floatingFields: Object.freeze(['status', 'speed', 'buffer']),
     floatingEntryEnabled: true, floatingEntryType: 'status-logo', floatingEdgeSnap: true, maxDepth: 20 });
   const cacheKey = 'bilismooth.startup.v4';
@@ -26,7 +26,7 @@
   }
   function patch(value) {
     const input = value && typeof value === 'object' ? value : {}, result = {};
-    for (const key of ['enabled', 'portHeuristic', 'stallRecovery', 'adaptiveRecovery', 'rewriteAkamai', 'p2pGuard', 'floatingEntryEnabled', 'floatingEdgeSnap'])
+    for (const key of ['enabled', 'portHeuristic', 'stallRecovery', 'rewriteAkamai', 'p2pGuard', 'floatingEntryEnabled', 'floatingEdgeSnap'])
       if (typeof input[key] === 'boolean') result[key] = input[key];
     for (const [key, values] of Object.entries({ selection: ['auto', 'fixed'], mode: ['off', 'bad-only', 'force'],
       mcdnStrategy: ['proxy-all', 'proxy-v1', 'replace'], lang: ['zh', 'en'], accent: accents, theme: ['system', 'light', 'dark'], floatingEntryType: floatingEntryTypes }))

@@ -10,7 +10,6 @@ const C = 'upos-tf-all-tx.bilivideo.com';
 const media = host => `https://${host}/upgcxcode/21/video.m4s?token=PRIVATE`;
 const peer = media('upos-sz-302ppio.bilivideo.com');
 const payload = () => ({ data: { dash: { video: [{ id: 120, baseUrl: peer, backupUrl: [] }] } } });
-const plain = value => JSON.parse(JSON.stringify(value));
 const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 
 test('settings v4 is the single default authority and cannot be replaced by an unvalidated route pool', () => {
@@ -60,9 +59,10 @@ test('scheduler source, alternate ports and international inclusion have indepen
   assert.equal(policy.createPolicy({ pcdnHost: B }).route(unusual).url, media(B));
   assert.equal(policy.createPolicy({ pcdnHost: B, portHeuristic: false }).route(unusual).url, unusual);
   const international = media('upos-hz-mirrorakam.akamaized.net');
-  assert.equal(policy.createPolicy({ rewriteAkamai: true }).route(international).url, media(A));
-  assert.equal(policy.createPolicy({ mode: 'force', pcdnHost: B }).route(media(A)).url, media(B));
-  assert.equal(policy.createPolicy({ mode: 'force', pcdnHost: B }).route(international).url, media(B));
+  assert.equal(policy.createPolicy({ selection: 'fixed', rewriteAkamai: true }).route(international).url, media(A));
+  assert.equal(policy.createPolicy({ selection: 'fixed', mode: 'force', pcdnHost: B }).route(media(A)).url, media(B));
+  assert.equal(policy.createPolicy({ selection: 'fixed', mode: 'force', pcdnHost: B }).route(international).url, media(B));
+  for (const raw of [media(A), international]) assert.equal(policy.createPolicy({ mode: 'force', rewriteAkamai: true, pcdnHost: B }).route(raw).url, raw);
   for (const config of [{ enabled: false }, { mode: 'off' }]) assert.equal(policy.createPolicy(config).route(peer).url, peer);
 });
 
@@ -79,7 +79,7 @@ test('delivery rendering preserves signed resource spelling and encodes the rela
 
 test('overlapping address facts admit independent intents with an authoritative source preference', () => {
   const raw = media('node.szbdyd.com') + '&os=mcdn&xy_usource=' + C;
-  const configured = policy.createPolicy({ mode: 'force', pcdnHost: B });
+  const configured = policy.createPolicy({ selection: 'fixed', mode: 'force', pcdnHost: B });
   assert.equal(configured.describe(raw).shared, true);
   assert.equal(configured.describe(raw).scheduler, true);
   assert.equal(new URL(configured.route(raw).url).hostname, C);
@@ -93,47 +93,30 @@ test('manifest preparation preserves quality metadata, input objects and mixed a
     flac: { display: true, audio: { id: 30251, codecs: 'fLaC', base_url: peer } }
   }, durl: [{ order: 1, length: 3000, url: peer.replace('m4s', 'mp4'), backup_url: [] }] } } };
   const before = JSON.stringify(input);
-  const result = policy.createPolicy({}).prepare(input, { ranking: [C, B, A] });
+  const result = policy.createPolicy({}).prepare(input);
   assert.equal(result.changed, true);
   assert.equal(JSON.stringify(input), before);
   const info = result.value.result.video_info, video = info.dash.video[0];
   assert.equal(video.baseUrl, media(A)); assert.equal(video.base_url, media(A));
-  assert.deepEqual(video.backupUrl, [media(C), media(B)]);
+  assert.deepEqual(video.backupUrl, []);
   assert.deepEqual(video.backup_url, video.backupUrl);
   assert.deepEqual(info.accept_quality, [120, 116, 80]);
   assert.equal(info.quality, 120); assert.equal(video.id, 120); assert.equal(video.width, 3840);
   assert.equal(video.height, 2160); assert.equal(video.codecs, 'hev1.2.4.L153');
-  for (const entry of [info.dash.audio[0], info.dash.flac.audio]) assert.deepEqual(entry.backup_url, video.backupUrl);
-  assert.deepEqual(info.dash.dolby.audio[0].backupUrl, video.backupUrl);
+  for (const entry of [info.dash.audio[0], info.dash.flac.audio]) assert.equal(entry.backup_url, undefined);
+  assert.equal(info.dash.dolby.audio[0].backupUrl, undefined);
   assert.equal(info.dash.dolby.audio[0].codecs, 'ec-3'); assert.equal(info.dash.flac.audio.codecs, 'fLaC');
   assert.equal(info.durl[0].length, 3000);
-  assert.deepEqual(info.durl[0].backup_url, [media(C).replace('m4s', 'mp4'), media(B).replace('m4s', 'mp4')]);
+  assert.deepEqual(info.durl[0].backup_url, []);
 });
 
-test('backup additions retain existing alternatives, deduplicate and obey fixed-selection behavior', () => {
+test('native alternatives retain their exact order and fixed-selection behavior', () => {
   const input = { data: { dash: { video: [{ baseUrl: media(A), backupUrl: [media(B), 'https://cdn.example/video.m4s'] }] } } };
-  const prepared = policy.createPolicy({}).prepare(input, { ranking: [B, C] }).value;
-  assert.deepEqual(prepared.data.dash.video[0].backupUrl, [media(B), 'https://cdn.example/video.m4s', media(C)]);
+  const prepared = policy.createPolicy({}).prepare(input).value;
+  assert.deepEqual(prepared.data.dash.video[0].backupUrl, [media(B), 'https://cdn.example/video.m4s']);
   assert.equal(policy.createPolicy({ selection: 'fixed' }).prepare(input).value, input);
   const disabled = policy.createPolicy({ enabled: false }).prepare(payload());
   assert.equal(disabled.changed, false); assert.equal(disabled.value.data.dash.video[0].baseUrl, peer);
-});
-
-test('the full default candidate pool retains native signed fallbacks within the eight-address limit', () => {
-  const native = media('upos-hz-mirrorakam.akamaized.net') + '&sign=native%2Bbackup';
-  const input = { data: { dash: { video: [{ baseUrl: media(A), backupUrl: [media(B), native] }] } } };
-  const routing = policy.createPolicy({});
-  const prepared = routing.prepare(input).value;
-  const backups = prepared.data.dash.video[0].backupUrl;
-  assert.equal(backups.length, 8);
-  assert.equal(new Set(backups).size, 8);
-  assert.equal(backups[0], media(B));
-  assert.equal(backups[1], native);
-  assert.deepEqual(input.data.dash.video[0].backupUrl, [media(B), native]);
-  assert.equal(routing.prepare(prepared).value, prepared);
-  const ranking = [...settings.candidatePool].reverse();
-  const reranked = routing.prepare(prepared, { ranking }).value.data.dash.video[0].backupUrl;
-  assert.deepEqual(reranked, backups);
 });
 
 test('live manifests can remove shared alternatives only when another usable address survives', () => {
@@ -230,11 +213,14 @@ test('synchronous XHR reuse retains the completed body evidence before native fi
   }
 });
 
-test('lightweight kernel flags expose only current reload and probe state', () => {
+test('lightweight kernel flags expose reload and current delivery state without session records', () => {
   const h = load();
-  assert.deepEqual(plain(h.api.getFlags()), { needReload: false, probing: false });
+  assert.equal(h.api.getFlags().needReload, false);
+  assert.deepEqual(Object.keys(h.api.getFlags()).sort(), ['delivery', 'needReload']);
+  assert.equal(h.api.getFlags().delivery.canTest, false);
+  assert.equal(h.api.getFlags().delivery.races, undefined);
   h.api.setConfig({ enabled: false });
-  assert.deepEqual(plain(h.api.getFlags()), { needReload: true, probing: false });
+  assert.equal(h.api.getFlags().needReload, true);
   assert.equal(h.api.getFlags().needReload, h.api.getState().needReload);
   const changed = h.api.getFlags(); changed.needReload = false;
   assert.equal(h.api.getFlags().needReload, true);
@@ -259,56 +245,33 @@ test('protected capability slots remain inert when a later page publisher assign
   assert.equal(initialized, 0); h.api.destroy(); assert.equal(h.api.getFlags().needReload, true);
 });
 
-test('fresh rank cache suppresses probing; expired or corrupt timestamps produce one bounded round', async () => {
+test('startup removes legacy ranking and feedback keys without probing or adopting their target', async () => {
   for (const age of [5 * 3600000, 6 * 3600000 + 1, 'corrupt']) {
-    const h = load({ storageGet: (key, now) => /rank/i.test(key) ? JSON.stringify({ ranking: [C], at: age === 'corrupt' ? 'bad-time' : now - age }) : null,
-      fetch: () => ({ ok: false, status: 403, body: { cancel() {} } }) });
+    const rank = 'bilismooth.routing.rank.v4.America/New_York|en-US', old = 'biliSmooth.playback-feedback.v1.America/New_York|en-US';
+    const store = new Map([[rank, JSON.stringify({ ranking: [C], at: age === 'corrupt' ? 'bad-time' : 1800000000000 - age })],
+      [old, JSON.stringify({ version: 1, rows: [{ host: A, failedAt: 1799999999000 }] })], ['unrelated', 'retained']]);
+    const h = load({ store, fetch: () => { throw Error('startup must not probe'); } });
     h.scope.__playinfo__ = payload(); await h.flush();
-    assert.equal(h.calls.length, age === 5 * 3600000 ? 0 : settings.candidatePool.length);
-    if (age === 5 * 3600000) assert.equal(h.config().pcdnHost, C);
-    h.scope.__playinfo__ = payload(); await h.flush();
-    assert.equal(h.calls.length, age === 5 * 3600000 ? 0 : settings.candidatePool.length, 'a second manifest must not duplicate this round');
-    h.api.destroy();
+    assert.equal(h.calls.length, 0); assert.equal(h.config().pcdnHost, A);
+    assert.equal(store.has(rank), false); assert.equal(store.has(old), false); assert.equal(store.get('unrelated'), 'retained');
+    store.set(rank, 'new unrelated observation'); h.scope.__playinfo__ = payload(); await h.flush();
+    assert.equal(store.has(rank), true, 'legacy cleanup runs at startup only'); h.api.destroy();
   }
 });
 
-test('probe cancellation settles even when fetch or body ignores abort, and discarded rounds cannot report success', async () => {
+test('race cancellation settles even when fetch or body ignores abort and cannot report a winner', async () => {
   for (const stage of ['fetch', 'body']) {
-    const timers = new Map(), controller = new AbortController(), samples = [];
-    let cancelled = 0, calls = 0, late;
+    const timers = new Map(), controller = new AbortController(), winners = [];
+    let calls = 0, late;
     const scope = { AbortController, performance: { now: () => 100 }, setTimeout: fn => { timers.set(1, fn); return 1; }, clearTimeout: id => timers.delete(id) };
     const stuck = new Promise(resolve => { late = resolve; });
-    const request = probe.run({ scope, targets: [{host:A,url:media(A)}], signal: controller.signal, onSample: sample => samples.push(sample),
-      fetch: () => { calls++; return stage === 'fetch' ? stuck : { ok: true, status: 200, body: { getReader: () => ({ read: () => stuck, cancel: () => { cancelled++; } }) } }; } });
+    const request = probe.race({ scope, now: () => 100, targets: [{host:A,url:media(A)}], range: {start: 0, end: 99}, signal: controller.signal, onWinner: sample => winners.push(sample),
+      fetch: () => { calls++; return stage === 'fetch' ? stuck : { status: 206, body: { getReader: () => ({ read: () => stuck }) } }; } });
     await flush(); controller.abort();
     const result = await request;
     assert.equal(calls, 1); assert.equal(result.samples[0].ok, false); assert.equal(result.samples[0].error, 'cancelled');
-    assert.equal(result.totalBytes, 0); assert.equal(samples.length, 1); assert.equal(timers.size, 0);
-    assert.equal(cancelled, stage === 'body' ? 1 : 0);
+    assert.equal(result.totalBytes, 0); assert.equal(winners.length, 0); assert.equal(timers.size, 0);
     late(stage === 'fetch' ? { ok: true, status: 200 } : { value: new Uint8Array(100), done: false }); await flush();
-    assert.equal(samples.length, 1); assert.equal(result.totalBytes, 0);
-  }
-});
-
-test('probe traffic is actual body bytes and stops at the first chunk reaching the budget', async () => {
-  let time = 0, reads = 0, cancels = 0;
-  const calls = [];
-  const scope = { AbortController, performance: { now: () => time }, setTimeout: () => 1, clearTimeout() {} };
-  const result = await probe.run({ scope, targets: [A,A,B].map(host=>({host,url:media(host)})), maxBytes: 100,
-    fetch: (url, options) => { calls.push({ url, options }); time += 5; return { ok: true, status: 200, body: { getReader: () => ({
-      read: async () => { reads++; time += 10; return { done: false, value: new Uint8Array(64) }; }, cancel: () => { cancels++; }
-    }) } }; } });
-  assert.equal(calls.length, 2); assert.equal(reads, 4); assert.equal(cancels, 2); assert.equal(result.totalBytes, 256);
-  assert.ok(result.samples.every(sample => sample.ok && sample.bytes === 128 && sample.mbps > 0));
-  for (const call of calls) { assert.equal(call.options.headers, undefined); assert.equal(call.options.credentials, 'omit'); assert.equal(call.options.cache, 'no-store'); assert.equal(call.options.method, 'GET'); }
-});
-
-test('empty successful probe responses cannot rank a CDN that delivered no media bytes', async () => {
-  for (const response of [new Response(null, { status: 204 }), new Response('', { status: 200 }), new Response('MEDIA', { status: 200 })]) {
-    const result = await probe.run({ targets: [{ host: A, url: media(A) }], fetch: () => response });
-    const sample = result.samples[0];
-    assert.equal(sample.ok, sample.bytes > 0);
-    if (!sample.bytes) { assert.equal(sample.ttfb, null); assert.equal(sample.mbps, 0); assert.equal(sample.error, 'empty-body'); }
-    else { assert.equal(sample.bytes, 5); assert.equal(sample.error, ''); }
+    assert.equal(winners.length, 0); assert.equal(result.totalBytes, 0);
   }
 });
