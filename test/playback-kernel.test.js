@@ -7,52 +7,8 @@ const A = settings.candidatePool[0], B = settings.candidatePool[1];
 const media = (host = A) => `https://${host}/upgcxcode/1/video.m4s?sign=PRIVATE`;
 const peer = media('upos-sz-302ppio.bilivideo.com');
 const payload = (base = peer) => ({ data: { dash: { video: [{ id: 120, baseUrl: base, backupUrl: [] }] } } });
-function emitter(object = {}) {
-  const listeners = new Map();
-  object.addEventListener = (type, fn) => { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); };
-  object.removeEventListener = (type, fn) => listeners.get(type)?.delete(fn);
-  object.emit = (type, detail = {}) => { for (const fn of [...(listeners.get(type) || [])]) fn({ type, ...detail }); };
-  object.count = type => listeners.get(type)?.size || 0;
-  return object;
-}
-function harness(options = {}) {
-  let clock = options.clock || 100000, serial = 0;
-  const timers = new Map(), events = [], calls = [], store = options.store || new Map();
-  const video = emitter({ paused: false, ended: false, readyState: 4, currentTime: 10, currentSrc: 'blob:video' });
-  const document = emitter({ hidden: false, querySelector: () => video, createElement: () => { throw new Error('kernel must be headless'); } });
-  class XHR {
-    constructor() { emitter(this); this.responseType = ''; this.readyState = 0; this.status = 0; this.headers = {}; this.responseHeaders = { 'content-type': 'video/mp4' }; this._text = ''; this._value = null; }
-    get response() { return this.responseType === 'json' ? this._value : this._text; }
-    get responseText() { if (this.responseType && this.responseType !== 'text') throw new DOMException('Invalid response type', 'InvalidStateError'); return this._text; }
-    open(...args) { this.openArgs = args; this.responseURL = String(args[1]); this.readyState = 1; }
-    setRequestHeader(name, value) { this.headers[name] = value; }
-    getResponseHeader(name) { return this.responseHeaders[name] || null; }
-    send(value) { this.body = value; }
-    finish(value, type = 'application/json') { this._value = value; this._text = JSON.stringify(value); this.responseHeaders['content-type'] = type; this.status = 200; this.readyState = 4; this.emit('load'); this.emit('loadend', { loaded: this._text.length }); }
-  }
-  const scope = { JSON: { parse: JSON.parse, stringify: JSON.stringify }, BiliSmoothRoutingPolicy: core, URL, Request, Response, Headers, AbortController, DOMException,
-    Date: { now: () => clock }, performance: { now: () => clock }, Intl, document, XMLHttpRequest: XHR,
-    navigator: { language: 'en-US' }, location: { href: 'https://www.bilibili.com/video/BVtest', origin: 'https://www.bilibili.com' },
-    localStorage: { getItem: key => store.get(key) || null, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
-    setTimeout(fn, ms) { timers.set(++serial, { fn, at: clock + ms }); return serial; }, clearTimeout(id) { timers.delete(id); },
-    setInterval(fn, ms) { timers.set(++serial, { fn, at: clock + ms, interval: ms }); return serial; }, clearInterval(id) { timers.delete(id); } };
-  if (options.fetch) scope.fetch = async (input, init) => { calls.push({ input, init }); return options.fetch(input, init, { advance: ms => clock += ms }); };
-  const originals = { parse: scope.JSON.parse, fetch: scope.fetch, open: XHR.prototype.open };
-  const kernel = Kernel.create({ scope, config: options.config || {}, onEvent: event => events.push(event) });
-  const flush = async () => { for (let i = 0; i < 80; i++) await Promise.resolve(); };
-  async function advance(ms) {
-    const target = clock + ms;
-    while (true) {
-      const next = [...timers.entries()].filter(([, item]) => item.at <= target).sort((a, b) => a[1].at - b[1].at)[0];
-      if (!next) break;
-      clock = next[1].at;
-      if (next[1].interval) next[1].at += next[1].interval; else timers.delete(next[0]);
-      next[1].fn(); await flush();
-    }
-    clock = target; await flush();
-  }
-  return { scope, kernel, events, calls, timers, store, video, document, originals, advance, flush };
-}
+const loadKernel = require('./support/kernel-harness.cjs');
+const harness = (options = {}) => loadKernel({ ...options, kernel: Kernel, now: options.clock ?? 100000 });
 
 test('all three globals and JSON.parse prepare playback with the full configured backup set', () => {
   const h = harness();

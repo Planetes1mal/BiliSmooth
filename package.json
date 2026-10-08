@@ -8,7 +8,7 @@
   "description": "Smoother Bilibili playback for overseas viewers.",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test --test-reporter=tap test/frame-monitor.test.js test/media-observer.test.js test/routing-contracts.test.js test/playback-kernel.test.js test/passive-session.test.js test/settings-content.test.js test/settings-kernel.test.js test/playback-feedback.test.js test/playback-recovery.test.js test/control-bridge.test.js test/floating-bridge.test.js test/speed-chart.test.js",
+    "test": "node --test --test-reporter=tap test/frame-monitor.test.js test/media-observer.test.js test/routing-contracts.test.js test/playback-kernel.test.js test/passive-session.test.js test/settings-content.test.js test/settings-kernel.test.js test/playback-feedback.test.js test/playback-recovery.test.js test/control-bridge.test.js test/speed-chart.test.js",
     "test:cdn": "node scripts/check-cdn.cjs",
     "test:browser": "node scripts/check-playback.cjs",
     "test:login": "node scripts/playback-auth.cjs",

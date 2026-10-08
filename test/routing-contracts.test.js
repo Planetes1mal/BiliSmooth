@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const settings = require('../src/core/settings.js');
 const policy = require('../src/core/routing-policy.js');
 const probe = require('../src/page/network-probe.js');
-const load = require('./kernel-harness.cjs');
+const load = require('./support/kernel-harness.cjs');
 const A = 'upos-sz-mirrorcosov.bilivideo.com', B = 'upos-sz-mirroraliov.bilivideo.com';
 const C = 'upos-tf-all-tx.bilivideo.com';
 const media = host => `https://${host}/upgcxcode/21/video.m4s?token=PRIVATE`;

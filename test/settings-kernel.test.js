@@ -5,13 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const A = 'upos-sz-mirrorcosov.bilivideo.com', B = 'upos-sz-mirroraliov.bilivideo.com';
 const peer = 'https://upos-sz-302ppio.bilivideo.com/upgcxcode/1/video.m4s?sign=IN_MEMORY_ONLY';
 const root = path.resolve(__dirname, '..');
-function emitter(value = {}) {
-  const listeners = new Map();
-  value.addEventListener = (type, fn) => { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); };
-  value.removeEventListener = (type, fn) => listeners.get(type)?.delete(fn);
-  value.emit = (type, event) => { for (const fn of [...(listeners.get(type) || [])]) fn(event); };
-  return value;
-}
+const emitter = require('./support/emitter.cjs');
 function load() {
   const wall = 1800000000000, timers = new Map(), dispatches = [], messages = [];
   let serial = 0;

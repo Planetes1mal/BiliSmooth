@@ -1,13 +1,7 @@
 // Unit observations only: simulated player state is never claimed as real playback evidence.
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
-function emitter(value = {}) {
-  const listeners = new Map();
-  value.addEventListener = (name, fn) => { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(fn); };
-  value.removeEventListener = (name, fn) => listeners.get(name)?.delete(fn);
-  value.emit = (name, data = {}) => { for (const fn of [...(listeners.get(name) || [])]) fn(data); };
-  return value;
-}
+const emitter = require('./support/emitter.cjs');
 const A = 'upos-sz-mirrorcosov.bilivideo.com', B = 'upos-sz-mirroraliov.bilivideo.com';
 const raw = `https://${A}/upgcxcode/1/video.m4s?sign=TOP_SECRET`, audio = `https://${B}/upgcxcode/1/audio.m4s?token=SECRET_AUDIO`;
 const payload = { data: { dash: { video: [{ id: 120, baseUrl: raw, backupUrl: [], width: 3840, height: 2160, frame_rate: '60' }], audio: [{ id: 1, baseUrl: audio }] } } };

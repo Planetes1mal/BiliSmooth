@@ -8,7 +8,8 @@ function extension(initial = {}) {
   let omitTabUrl = false, autoCompleteReload = true;
   const completeReload = id => { viewVersion = require('../package.json').version; for (const fn of [...updates]) fn(id, { status: 'complete' }); };
   const store = structuredClone(initial), changes = [], listeners = [], actionListeners = [], messages = [], writes = [], tabs = [];
-  let failWrite = false, failRead = false, viewVersion = require('../package.json').version;
+  let failWrite = false, failRead = false, failOpen = false, viewVersion = require('../package.json').version;
+  const sender = { id: 'test-extension', tab: { id: 27, url: 'https://www.bilibili.com/video/BVfixture' } };
   const storage = { get: async () => { if (failRead) throw Error('read denied'); return structuredClone(store); }, set: async data => {
     if (failWrite) throw Error('disk full');
     const diff = {};
@@ -18,19 +19,20 @@ function extension(initial = {}) {
     }
     writes.push(data); for (const fn of changes) fn(diff, 'local');
   } };
+  const request = (message, source = { id: sender.id }) => new Promise((resolve, reject) => {
+    messages.push(message); let accepted = false;
+    if (message.channel === 'bilismooth-control' && message.action === 'locate' && tabs.length) { resolve({ ok: true, tabId: tabs[0].id, version: viewVersion }); return; }
+    if (message.channel === 'bilismooth-control' && message.action === 'select-tab' && viewVersion === require('../package.json').version && tabs.length) { const url = new URL(tabs[0].url); url.searchParams.set('tab', String(message.tabId)); tabs[0].url = url.href; resolve({ ok: true }); return; }
+    for (const fn of listeners) if (fn(message, source, resolve)) accepted = true;
+    if (!accepted) reject(Error('no receiver'));
+  });
   const chrome = { storage: { local: storage, onChanged: { addListener: fn => changes.push(fn) } },
     runtime: { id: 'test-extension', getURL: file => 'chrome-extension://test-extension/' + file,
       getManifest: () => ({ version: require('../package.json').version }),
-      onMessage: { addListener: fn => listeners.push(fn) }, sendMessage: message => new Promise((resolve, reject) => {
-        messages.push(message); let accepted = false;
-        if (message.channel === 'bilismooth-control' && message.action === 'locate' && tabs.length) { resolve({ ok: true, tabId: tabs[0].id, version: viewVersion }); return; }
-        if (message.channel === 'bilismooth-control' && message.action === 'select-tab' && viewVersion === require('../package.json').version && tabs.length) { const url = new URL(tabs[0].url); url.searchParams.set('tab', String(message.tabId)); tabs[0].url = url.href; resolve({ ok: true }); return; }
-        for (const fn of listeners) if (fn(message, { id: 'test-extension' }, resolve)) accepted = true;
-        if (!accepted) reject(Error('no receiver'));
-      }) }, action: { onClicked: { addListener: fn => actionListeners.push(fn) } },
+      onMessage: { addListener: fn => listeners.push(fn) }, sendMessage: request }, action: { onClicked: { addListener: fn => actionListeners.push(fn) } },
     tabs: { onUpdated: { addListener: fn => updates.add(fn), removeListener: fn => updates.delete(fn) }, onRemoved: { addListener: fn => removals.add(fn), removeListener: fn => removals.delete(fn) },
       reload: async id => { reloads.push(id); for (const fn of [...updates]) fn(id, { status: 'loading' }); if (autoCompleteReload) Promise.resolve().then(() => completeReload(id)); },
-      query: async () => tabs, get: async id => { const tab = { ...tabs.find(tab => tab.id === id) }; if (omitTabUrl) delete tab.url; return tab; }, create: async tab => { tabs.push({ ...tab, id: tabs.length + 10, windowId: 1 }); },
+      query: async () => tabs, get: async id => { const tab = { ...tabs.find(tab => tab.id === id) }; if (omitTabUrl) delete tab.url; return tab; }, create: async tab => { if (failOpen) throw Error('cannot-open'); tabs.push({ ...tab, id: tabs.length + 10, windowId: 1 }); },
       update: async (id, change) => { tabUpdates.push({ id, ...change }); return Object.assign(tabs.find(tab => tab.id === id), change); } },
     windows: { update: async () => {} } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/extension/background.js'), 'utf8'), {
@@ -38,7 +40,7 @@ function extension(initial = {}) {
   });
   function content({ unreachable = false } = {}) {
     const posted = [], events = [], runtime = [], sent = [];
-    const sendMessage = unreachable ? async message => { sent.push(message); throw Error('Could not establish connection. Receiving end does not exist.'); } : chrome.runtime.sendMessage;
+    const sendMessage = unreachable ? async message => { sent.push(message); throw Error('Could not establish connection. Receiving end does not exist.'); } : message => request(message, sender);
     const pageChrome = { ...chrome, runtime: { ...chrome.runtime, sendMessage, onMessage: { addListener: fn => runtime.push(fn) } } };
     const scope = { chrome: pageChrome, location: { origin: 'https://www.bilibili.com' }, crypto, clearTimeout,
       setTimeout: unreachable ? fn => Promise.resolve().then(fn) : setTimeout, BiliSmoothSettings: settings, BiliSmoothSettingsMigration: migration,
@@ -50,10 +52,10 @@ function extension(initial = {}) {
     return { posted, message, runtime, sent };
   }
   const command = (action, patch) => chrome.runtime.sendMessage({ channel: 'bilismooth-settings', action, patch });
-  return { store, writes, messages, content, command, tabs, actionListeners, reloads, tabUpdates, updates, removals, completeReload,
+  return { store, writes, messages, content, command, tabs, actionListeners, reloads, tabUpdates, updates, removals, completeReload, sender, request, changes,
     hideTabUrl(value) { omitTabUrl = value; }, autoCompleteReload(value) { autoCompleteReload = value; },
     setViewVersion(value) { viewVersion = value; },
-    failWrite(value) { failWrite = value; }, failRead(value) { failRead = value; } };
+    failWrite(value) { failWrite = value; }, failRead(value) { failRead = value; }, failOpen(value) { failOpen = value; } };
 }
 test('one-time migration preserves old preferences and rollback records without trusting obsolete experiments', async () => {
   // Import uses the record shape; the historical storage key is irrelevant.
@@ -152,4 +154,25 @@ test('legacy reload waits for the new document before selecting an explicitly in
   assert.equal(h.messages.filter(row => row.action === 'select-tab').length, 1);
   assert.equal(h.tabUpdates.some(change => 'url' in change), false);
   assert.equal(h.tabs.length, 1); assert.equal(h.updates.size, 0); assert.equal(h.removals.size, 0);
+});
+test('floating entry opens one dashboard associated with sender tab and acknowledges real failures', async () => {
+  const h = extension({ bilismoothMotion: false }), page = h.content(); await flush();
+  page.message({ __bilismoothFloating: 'open-control', id: 'first', tabId: 999 }); await flush();
+  assert.equal(h.tabs.length, 1); assert.match(h.tabs[0].url, /\?tab=27$/);
+  assert.equal(page.posted.find(row => row.id === 'first').ok, true);
+  h.sender.tab.id = 28; page.message({ __bilismoothFloating: 'open-control', id: 'second' }); await flush();
+  assert.equal(h.tabs.length, 1); assert.equal(h.messages.find(row => row.action === 'select-tab').tabId, 28);
+  assert.equal(page.posted.find(row => row.id === 'second').ok, true);
+  const failing = extension({ bilismoothMotion: false }), failedPage = failing.content(); failing.failOpen(true);
+  failedPage.message({ __bilismoothFloating: 'open-control', id: 'failure' }); await flush();
+  assert.equal(failedPage.posted.find(row => row.id === 'failure').ok, false); assert.equal(failing.tabs.length, 0);
+});
+test('floating motion uses the existing preference and rejected senders cannot invoke its bridge', async () => {
+  const h = extension({ bilismoothMotion: false }), page = h.content(); page.message({ __bilismoothFloating: 'ready' }); await flush();
+  assert.equal(page.posted.find(row => row.__bilismoothFloating === 'motion').value, false);
+  h.store.bilismoothMotion = true; for (const listener of h.changes) listener({ bilismoothMotion: { newValue: true } }, 'local'); await flush();
+  assert.equal(page.posted.filter(row => row.__bilismoothFloating === 'motion').at(-1).value, true);
+  await assert.rejects(h.request({ channel: 'bilismooth-control', action: 'open' }, { id: 'foreign', tab: h.sender.tab }));
+  await assert.rejects(h.request({ channel: 'bilismooth-control', action: 'open' }, { id: h.sender.id, tab: { id: 1, url: 'https://example.com/' } }));
+  assert.equal(h.tabs.length, 0);
 });
