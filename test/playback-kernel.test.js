@@ -322,3 +322,50 @@ test('disable stops future routing and guards report reload requirements without
   assert.throws(() => new guarded.scope.RTCPeerConnection(), { name: 'NotAllowedError' });
   guarded.kernel.destroy(); assert.equal(guarded.kernel.getState().needReload, true);
 });
+
+test('measured races preserve issued signatures, bound Range bytes and route on the first complete winner', async () => {
+  const akamai = 'upos-hz-mirrorakam.akamaized.net', bytes = 768 * 1024;
+  const issued = `https://${A}/upgcxcode/1/42231991605-1-30080.m4s?sign=UPOS%2Bprivate`;
+  const alternate = issued.replace(A, akamai).replace('UPOS', 'AKAMAI');
+  const rankKey = Kernel.constants.RANK_PREFIX + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US';
+  for (const [name, range, loaded, finished, duration, firstStatus, runner, switched] of [
+    ['remaining fragment', 'bytes=4096-2101247', 131072, false, 1000, 206, true, true],
+    ['next fragment', 'bytes=0-131071', 131072, true, 1000, 206, true, true],
+    ['short range and deadline', 'bytes=1024-33791', 0, false, 1000, 206, false, true],
+    ['current host stays faster', 'bytes=0-2097151', 1048576, false, 100, 206, true, false],
+    ['ignored Range is not a winner', 'bytes=0-1048575', 0, false, 1000, 200, true, true]
+  ]) {
+    const pending = [], store = new Map([[rankKey, JSON.stringify({ ranking: [A, B], samples: [], at: 100000 })]]);
+    const h = harness({ store, fetch: (url, init) => new Promise(resolve => pending.push({ url, init, resolve })) });
+    h.scope.__playinfo__ = { dash: { video: [{ id: 120, bandwidth: 9000000, baseUrl: issued, backupUrl: [alternate] }] } };
+    const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', issued); xhr.setRequestHeader('Range', range); xhr.send();
+    let timeouts = 0; xhr.addEventListener('timeout', () => timeouts++);
+    await h.advance(duration); if (loaded) xhr.progress(loaded); if (finished) xhr.complete(loaded);
+    assert.equal(h.kernel.testRoutes(), true, name); assert.equal(pending.length, 2, name);
+    const [start, end] = range.slice(6).split('-').map(Number), offset = finished ? end + 1 : start + loaded;
+    const expectedBytes = finished ? bytes : Math.min(bytes, end - offset + 1), wantedRange = `bytes=${offset}-${offset + expectedBytes - 1}`;
+    assert.equal(pending[0].url, alternate, name);
+    assert.equal(pending[1].url, issued.replace(A, B), name);
+    for (const item of pending) {
+      assert.deepEqual(item.init.headers, { Range: wantedRange }, name);
+      assert.equal(item.init.credentials, 'omit'); assert.equal(item.init.mode, 'cors');
+    }
+    const response = status => ({ status, body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(expectedBytes) }) }) } });
+    await h.advance(200); pending[0].resolve(response(firstStatus)); await h.flush();
+    const early = h.kernel.getState().session;
+    assert.equal(early.racing, true, name);
+    assert.equal(h.kernel.rewriteUrl(issued), firstStatus === 206 && switched ? alternate : issued, name);
+    assert.equal(h.kernel.getConfig().pcdnHost, A, name); assert.equal(timeouts, 0, name);
+    assert.equal(xhr.url, issued, 'the race does not end or replace the native request in flight');
+    if (runner) { await h.advance(100); pending[1].resolve(response(206)); await h.flush(); }
+    else await h.advance(3800);
+    const final = h.kernel.getState().session, result = final.lastRace;
+    assert.equal(final.racing, false, name); assert.equal(result.switched, switched, name);
+    assert.equal(result.winner, firstStatus === 206 ? akamai : B, name);
+    assert.equal(result.runnerUp, runner && firstStatus === 206 ? B : null, name);
+    assert.ok(result.samples.reduce((sum, item) => sum + item.bytes, 0) <= 2 * bytes, name);
+    assert.ok(result.samples.every(item => item.bytes <= bytes && item.elapsedMs <= 4000), name);
+    assert.equal(h.kernel.rewriteUrl(issued), switched ? firstStatus === 206 ? alternate : issued.replace(A, B) : issued, name);
+    assert.doesNotMatch(JSON.stringify(final), /UPOS|AKAMAI|private|https?:|sign=/); h.kernel.destroy();
+  }
+});

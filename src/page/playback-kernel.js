@@ -6,8 +6,9 @@
   const instances = new WeakMap();
   const RANK_PREFIX = 'bilismooth.routing.rank.v4.', FEEDBACK_PREFIX = 'biliSmooth.playback-feedback.v1.';
   const RANK_TTL_MS = 21600000, STALL_GRACE_MS = 2500, STALL_RETRY_MS = 5000;
-  const PROBE_TIMEOUT_MS = 4000, PROBE_MAX_HOSTS = 12, PROBE_BYTES = 786432, EVIDENCE_MAX_AGE_MS = 1500, NO_RESPONSE_MS = 2000;
-  const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js'), delivery: require('../core/delivery-session.js'), throughput: require('../core/throughput.js') } : {};
+  const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js'), delivery: require('../core/delivery-session.js'), throughput: require('../core/throughput.js'), deliveryPolicy: require('../core/delivery-policy.js') } : {};
+  const DeliveryPolicy = global.BiliSmoothDeliveryPolicy || imported.deliveryPolicy, C = DeliveryPolicy.constants;
+  const PROBE_TIMEOUT_MS = C.RACE_TIMEOUT_MS, PROBE_MAX_HOSTS = 12, PROBE_BYTES = C.RACE_SAMPLE_BYTES, EVIDENCE_MAX_AGE_MS = 1500, NO_RESPONSE_MS = 2000;
   function create(options = {}) {
     const root = options.scope || global;
     if (instances.has(root)) return instances.get(root);
@@ -27,6 +28,8 @@
     let config = settings.normalize(options.config), destroyed = false, interceptor = null;
     let policy = core.createPolicy(config);
     const delivery = DeliverySession.create({ pool: config.candidatePool }), preparedPayloads = new WeakSet(), measurements = new Map();
+    const videoRequests = new Map(), recentFragments = new Map();
+    let measuredRace = null;
     let watchedVideo = null, watchTimer = null, stallTimer = null, stallDeadlineAt = null, rotateCursor = 0;
     let requestSerial = 0, networkEpoch = 0, feedbackGeneration, recentVideoFailure = null, lastVideoHost = null, lastRecoveryAt = -Infinity;
     let feedback = null, probeEpoch = 0, probeRound = null, probed = false, lastSample = null;
@@ -96,6 +99,7 @@
     function prepare(value, source) {
       if(!value||typeof value!=='object')return {value,changed:false};
       if (!preparedPayloads.has(value)) delivery.collect(value);
+      if (measuredRace && measuredRace.cid !== delivery.current()?.cid) stopMeasuredRace();
       let original;try{original=plainCopy(value);}catch{original=null;}
       const prepared=policy.prepare(value,{ranking:state.ranking});
       preparedPayloads.add(prepared.value);
@@ -121,6 +125,12 @@
       return reason==='probe-failed'||!weakRoute(config.pcdnHost,video)?reason:'';
     }
     function planRoute(raw) {
+      const session = delivery.current(), representation = delivery.get(raw), facts = policy.describe(raw);
+      if (config.selection === 'auto' && session?.activeHost && session.activeEpoch === networkEpoch && representation?.cid === session.cid
+        && facts.media && (facts.distribution || facts.international) && !facts.shared && !facts.live && !facts.scheduler && !facts.relaySource) {
+        const url = delivery.addressForHost(raw, session.activeHost);
+        if (url) return { original: raw, url, changed: url !== raw, reason: 'measured-route', targetHost: session.activeHost };
+      }
       if(recovery.avoidHost)watchVideo();
       const host=hostOf(raw), reason=recovery.avoidHost&&host===recovery.avoidHost?'recovery':avoidReason(raw,host);
       const result=(reason?core.createPolicy({...config,mode:'force'}):policy).route(raw);
@@ -196,6 +206,9 @@
         transport, method, range, startedAt: now(), kind, networkEpoch,
         cid: representation?.cid ?? null, representationKind: representation?.kind ?? null,
         mediaGeneration: generation, player: watchedVideo };
+      if (request.representationKind === 'video' && transport === 'xhr') {
+        request.bytes = 0; request.firstByteAt = null; request.hiddenOverlap = !!document?.hidden; videoRequests.set(request.id, request);
+      }
       state.lastMediaHost = request.host || state.lastMediaHost;
       if (kind === 'video' || kind === 'muxed') lastVideoHost = request.host;
       // DOM references are private request ownership, never part of event data.
@@ -209,6 +222,13 @@
         transport: request.transport, method: request.method, range: request.range, startedAt: request.startedAt,
         elapsedMs: Math.max(0, now() - request.startedAt), bytes: 0, complete: false, ...detail };
       emit(event);
+      if (videoRequests.has(request.id)) {
+        request.bytes = event.bytes; request.firstByteAt = event.firstByteAt; request.hiddenOverlap = event.hiddenOverlap;
+        if (type === 'transfer') {
+          videoRequests.delete(request.id);
+          if (event.complete) { request.completedAt = event.completedAt; recentFragments.set(request.cid, request); }
+        }
+      }
       if (type === 'transfer' && request.cid && request.networkEpoch === networkEpoch) {
         let meter = measurements.get(request.cid);
         if (!meter) { meter = Throughput.create(); measurements.set(request.cid, meter); }
@@ -218,6 +238,45 @@
           outcome: event.complete ? event.outcome : 'incomplete' });
       }
       try { observePlaybackTransfer(request, event); } catch (_) { /* Feedback cannot affect native delivery. */ }
+    }
+    function stopMeasuredRace() { const round = measuredRace; measuredRace = null; round?.controller.abort(); }
+    function testRoutes() {
+      const session = delivery.current();
+      if (!active() || config.selection !== 'auto' || document?.hidden || measuredRace || !session || typeof nativeFetch !== 'function') return false;
+      const request = [...videoRequests.values()].find(row => row.cid === session.cid && !row.hiddenOverlap) || recentFragments.get(session.cid);
+      if (!request || request.hiddenOverlap) return false;
+      const match = /^bytes=(\d+)-(\d+)$/.exec(request.range);
+      if (!match) return false;
+      const start = request.completedAt ? Number(match[2]) + 1 : Number(match[1]) + request.bytes;
+      const end = request.completedAt ? start + C.RACE_SAMPLE_BYTES - 1 : Math.min(Number(match[2]), start + C.RACE_SAMPLE_BYTES - 1);
+      if (start > end) return false;
+      const rep = delivery.get(request.originalUrl), currentHost = request.host;
+      const targets = [...new Set([...rep.urls.keys(), ...config.candidatePool])].filter(host => host !== currentHost)
+        .map(host => ({ host, url: delivery.addressForHost(request.originalUrl, host) })).filter(target => target.url).slice(0, C.RACE_CHALLENGERS);
+      if (!targets.length) return false;
+      const sustained = measurements.get(session.cid)?.snapshot().find(row => row.host === currentHost)?.goodputBps || 0;
+      const rate = request.bytes * 8000 / ((request.completedAt || now()) - request.startedAt) || sustained;
+      const currentMs = rate > 0 ? (end - start + 1) * 8000 / rate : Infinity;
+      const record = { requestId: request.id, trigger: 'manual', range: `bytes=${start}-${end}`, contenders: targets.map(target => target.host),
+        winner: null, runnerUp: null, samples: [], switched: false };
+      session.lastRace = record;
+      const round = { cid: session.cid, controller: new root.AbortController() }; measuredRace = round;
+      log('race', { reason: 'started', id: request.id, host: currentHost });
+      Probes.race({ scope: root, now, fetch: nativeFetch, signal: round.controller.signal, range: { start, end }, targets,
+        onWinner(sample) {
+          if (measuredRace !== round) return;
+          record.winner = sample.host; record.samples = [sample];
+          if (DeliveryPolicy.beatsCurrent(sample.elapsedMs, currentMs)) {
+            session.activeHost = sample.host; session.activeEpoch = networkEpoch; record.switched = true;
+            log('switch', { id: request.id, fromHost: currentHost, toHost: sample.host, reason: 'manual' });
+          }
+        }
+      }).then(result => {
+        if (measuredRace !== round) return;
+        measuredRace = null; record.samples = result.samples; record.runnerUp = result.runnerUp?.host || null;
+        log('race', { reason: 'finished', id: request.id, host: record.winner || currentHost, bytes: result.totalBytes });
+      });
+      return true;
     }
     function playerContext() {
       return { readyState: Number.isFinite(watchedVideo?.readyState) ? watchedVideo.readyState : null,
@@ -325,13 +384,14 @@
       if(event.type==='seeked'&&watchedVideo&&!watchedVideo.paused&&!watchedVideo.ended&&watchedVideo.readyState<3)onWaiting(event);
     }
     function onVisibilityChange(){
-      log('player-event',{source:'visibilitychange',...playerContext()});if(document?.hidden){cancelStall('hidden');return;}
+      log('player-event',{source:'visibilitychange',...playerContext()});if(document?.hidden){for(const request of videoRequests.values())request.hiddenOverlap=true;stopMeasuredRace();cancelStall('hidden');return;}
       if(watchedVideo&&!watchedVideo.paused&&!watchedVideo.ended&&watchedVideo.readyState<3)onWaiting({type:'visible'});else onPlaying({type:'visible-ready'});
     }
     const playerHandlers=[['waiting',onWaiting],['stalled',onWaiting],['playing',onPlaying],['canplay',onPlaying],['suspend',onSuspend],
       ['pause',onWaitInterrupted],['seeking',onWaitInterrupted],['seeked',onWaitInterrupted],['emptied',onWaitInterrupted]];
     function unwatchVideo(){for(const [name,fn]of playerHandlers)watchedVideo?.removeEventListener?.(name,fn);}
     function clearRecovery(){
+      videoRequests.clear(); recentFragments.clear(); stopMeasuredRace();
       recentVideoFailure=null;lastVideoHost=null;state.lastMediaHost=null;lastRecoveryAt=-Infinity;
       recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);recovery.clearTimer=null;
     }
@@ -344,7 +404,7 @@
       for(const [name,fn]of playerHandlers)watchedVideo?.addEventListener(name,fn,{passive:true});
     }
     function resetNetwork(){
-      networkEpoch++;measurements.clear();stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;avoided.clear();
+      networkEpoch++;videoRequests.clear();recentFragments.clear();stopMeasuredRace();measurements.clear();stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;avoided.clear();
       feedback?.clear();saveFeedback();recentVideoFailure=null;lastVideoHost=null;lastRecoveryAt=-Infinity;rotateCursor=0;
       recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);cancelStall('network-reset');
       try{root.localStorage?.removeItem(rankingKey());}catch{}log('network-reset');
@@ -353,7 +413,7 @@
     function setConfig(next){
       const before=config;config=settings.normalize({...config,...next});policy=core.createPolicy(config);
       if(before.enabled!==config.enabled||config.p2pGuard!==initialGuard)state.needReload=true;
-      if(!active()||config.selection!=='auto'){stopProbes();probed=false;}
+      if(!active()||config.selection!=='auto'){stopMeasuredRace();stopProbes();probed=false;}
       if(!active()||!config.stallRecovery){cancelStall(active()?'recovery-disabled':'disabled');clearLater(recovery.clearTimer);recovery.avoidHost=null;}
       if(config.selection==='auto'&&before.selection!=='auto')applyRanking(state.ranking);
       if(active()&&lastSample&&(!before.enabled||before.mode==='off'||before.selection!==config.selection))scheduleProbe(lastSample);
@@ -363,7 +423,9 @@
     function getFlags(){return {needReload:state.needReload,probing:state.probing};}
     function sessionSnapshot() {
       const session = delivery.snapshot();
-      return session ? { ...session, hosts: measurements.get(session.cid)?.snapshot() || [] } : null;
+      return session ? { ...session, hosts: measurements.get(session.cid)?.snapshot() || [],
+        activeHost: delivery.current().activeEpoch === networkEpoch ? delivery.current().activeHost : null,
+        racing: measuredRace?.cid === session.cid, lastRace: delivery.current().lastRace ? plainCopy(delivery.current().lastRace) : null } : null;
     }
     function getState(){return {...plainCopy(state),config:getConfig(),effectiveRanking:recoveryCandidates(),playbackFeedback:feedback?.snapshot()||null,session:sessionSnapshot()};}
     function retry(){
@@ -373,11 +435,11 @@
       return true;
     }
     function destroy(){
-      if(destroyed)return;stopProbes();cancelStall('destroy');clearLater(recovery.clearTimer);clearEvery(watchTimer);unwatchVideo();
+      if(destroyed)return;stopMeasuredRace();stopProbes();cancelStall('destroy');clearLater(recovery.clearTimer);clearEvery(watchTimer);unwatchVideo();
       document?.removeEventListener?.('visibilitychange',onVisibilityChange);interceptor?.destroy();if(initialGuard)state.needReload=true;
       destroyed=true;instances.delete(root);
     }
-    const api={getConfig,setConfig,getFlags,getState,resetNetwork,retry,rewriteUrl:raw=>active()?planRoute(raw).url:raw,destroy};
+    const api={getConfig,setConfig,getFlags,getState,resetNetwork,retry,testRoutes,rewriteUrl:raw=>active()?planRoute(raw).url:raw,destroy};
     instances.set(root,api);
     const Feedback=root.BiliSmoothPlaybackFeedback||global.BiliSmoothPlaybackFeedback;
     if(Feedback){let initial;try{initial=Reflect.apply(nativeParse,json,[root.localStorage?.getItem(feedbackKey())||'null']);}catch{}feedback=Feedback.create({hosts:config.candidatePool,now:wallNow,initial});}
