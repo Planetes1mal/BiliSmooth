@@ -328,16 +328,20 @@ test('measured races preserve issued signatures, bound Range bytes and route on 
   const issued = `https://${A}/upgcxcode/1/42231991605-1-30080.m4s?sign=UPOS%2Bprivate`;
   const alternate = issued.replace(A, akamai).replace('UPOS', 'AKAMAI');
   const rankKey = Kernel.constants.RANK_PREFIX + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US';
-  for (const [name, range, loaded, finished, duration, firstStatus, runner, switched] of [
+  for (const [name, range, loaded, finished, duration, firstStatus, runner, switched, previousGoodput] of [
     ['remaining fragment', 'bytes=4096-2101247', 131072, false, 1000, 206, true, true],
     ['next fragment', 'bytes=0-131071', 131072, true, 1000, 206, true, true],
-    ['short range and deadline', 'bytes=1024-33791', 0, false, 1000, 206, false, true],
+    ['zero-byte hang after healthy fragments', 'bytes=1024-33791', 0, false, 1000, 206, false, true, true],
     ['current host stays faster', 'bytes=0-2097151', 1048576, false, 100, 206, true, false],
     ['ignored Range is not a winner', 'bytes=0-1048575', 0, false, 1000, 200, true, true]
   ]) {
     const pending = [], store = new Map([[rankKey, JSON.stringify({ ranking: [A, B], samples: [], at: 100000 })]]);
     const h = harness({ store, fetch: (url, init) => new Promise(resolve => pending.push({ url, init, resolve })) });
     h.scope.__playinfo__ = { dash: { video: [{ id: 120, bandwidth: 9000000, baseUrl: issued, backupUrl: [alternate] }] } };
+    if (previousGoodput) {
+      const healthy = new h.scope.XMLHttpRequest(); healthy.open('GET', issued); healthy.setRequestHeader('Range', 'bytes=0-131071'); healthy.send();
+      await h.advance(20); healthy.progress(131072); healthy.complete(131072);
+    }
     const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', issued); xhr.setRequestHeader('Range', range); xhr.send();
     let timeouts = 0; xhr.addEventListener('timeout', () => timeouts++);
     await h.advance(duration); if (loaded) xhr.progress(loaded); if (finished) xhr.complete(loaded);

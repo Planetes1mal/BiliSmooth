@@ -28,7 +28,7 @@
     let config = settings.normalize(options.config), destroyed = false, interceptor = null;
     let policy = core.createPolicy(config);
     const delivery = DeliverySession.create({ pool: config.candidatePool }), preparedPayloads = new WeakSet(), measurements = new Map();
-    const videoRequests = new Map(), recentFragments = new Map();
+    const videoRequests = new Map(), recentFragments = new Map(), syntheticHistory = new Map();
     let measuredRace = null;
     let watchedVideo = null, watchTimer = null, stallTimer = null, stallDeadlineAt = null, rotateCursor = 0;
     let requestSerial = 0, networkEpoch = 0, feedbackGeneration, recentVideoFailure = null, lastVideoHost = null, lastRecoveryAt = -Infinity;
@@ -255,7 +255,7 @@
         .map(host => ({ host, url: delivery.addressForHost(request.originalUrl, host) })).filter(target => target.url).slice(0, C.RACE_CHALLENGERS);
       if (!targets.length) return false;
       const sustained = measurements.get(session.cid)?.snapshot().find(row => row.host === currentHost)?.goodputBps || 0;
-      const rate = request.bytes * 8000 / ((request.completedAt || now()) - request.startedAt) || sustained;
+      const rate = request.bytes * 8000 / ((request.completedAt || now()) - request.startedAt) || (request.completedAt ? sustained : 0);
       const currentMs = rate > 0 ? (end - start + 1) * 8000 / rate : Infinity;
       const record = { requestId: request.id, trigger: 'manual', range: `bytes=${start}-${end}`, contenders: targets.map(target => target.host),
         winner: null, runnerUp: null, samples: [], switched: false };
@@ -269,6 +269,7 @@
           if (DeliveryPolicy.beatsCurrent(sample.elapsedMs, currentMs)) {
             session.activeHost = sample.host; session.activeEpoch = networkEpoch; record.switched = true;
             log('switch', { id: request.id, fromHost: currentHost, toHost: sample.host, reason: 'manual' });
+            interceptor.syntheticTimeout(request.id);
           }
         }
       }).then(result => {
@@ -425,6 +426,7 @@
       const session = delivery.snapshot();
       return session ? { ...session, hosts: measurements.get(session.cid)?.snapshot() || [],
         activeHost: delivery.current().activeEpoch === networkEpoch ? delivery.current().activeHost : null,
+        syntheticTimeouts: { ...interceptor.syntheticStatus(), events: plainCopy(syntheticHistory.get(session.cid) || []) },
         racing: measuredRace?.cid === session.cid, lastRace: delivery.current().lastRace ? plainCopy(delivery.current().lastRace) : null } : null;
     }
     function getState(){return {...plainCopy(state),config:getConfig(),effectiveRanking:recoveryCandidates(),playbackFeedback:feedback?.snapshot()||null,session:sessionSnapshot()};}
@@ -445,6 +447,16 @@
     if(Feedback){let initial;try{initial=Reflect.apply(nativeParse,json,[root.localStorage?.getItem(feedbackKey())||'null']);}catch{}feedback=Feedback.create({hosts:config.candidatePool,now:wallNow,initial});}
     const cached=loadRanking();if(cached){state.probeSamples=cached.samples;state.probedAt=new Date(cached.at).toISOString();applyRanking(cached.ranking);}
     interceptor=RequestLayer.install({scope:root,active,route,prepare,sharingPolicy:initialGuard,
+      fragmentKey(raw, range) {
+        const rep = delivery.get(raw);
+        return rep?.kind === 'video' && /^bytes=\d+-\d+$/.test(range) ? `${rep.cid}|${rep.key}|${range}` : null;
+      },
+      onSynthetic(event) {
+        const { cid, at, ...record } = event;
+        if (!syntheticHistory.has(cid)) syntheticHistory.set(cid, []);
+        syntheticHistory.get(cid).push({ ...record, at: wallNow() });
+        log('synthetic-timeout', { phase: event.phase, id: event.id, host: event.host, reason: event.reason, delayMs: event.delayMs });
+      },
       begin:info=>beginRequest(info.originalUrl,info.url,info.transport,info.method,info.range),onTransfer:reportTransfer,
       ignoreTiming:entry=>probeTimings.some(probe=>probe.url===entry.name&&entry.startTime>=probe.startedAt-3&&entry.startTime<=probe.startedAt+20),
       onSharingBlock:name=>{state.p2pBlocked++;log('p2p-blocked',{api:name});}});

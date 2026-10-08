@@ -97,7 +97,7 @@
   // Signed addresses stay in the private catalog/request map; event exports are an explicit whitelist.
   function log(type, fields = {}) {
     const row = { type: String(type).slice(0, 60), at: Number.isFinite(fields.at) ? fields.at : Date.now(), seq: ++eventSerial };
-    for (const key of ['host', 'requestedHost', 'responseHost', 'fromHost', 'toHost', 'reason', 'source', 'transport', 'kind', 'outcome', 'action']) {
+    for (const key of ['host', 'requestedHost', 'responseHost', 'fromHost', 'toHost', 'reason', 'source', 'transport', 'kind', 'outcome', 'action', 'phase']) {
       if (typeof fields[key] === 'string') row[key] = fields[key].replace(/https?:\/\/\S+|\?\S+/g, '[redacted]').slice(0, 160);
     }
     for (const key of ['bytes', 'elapsedMs', 'durationMs', 'status', 'ageMs', 'buffer', 'mbps', 'readyState', 'playhead', 'rate', 'deadlineAt', 'dueInMs', 'delayMs', 'observedStallMs', 'firstByteMs', 'completedAt']) {

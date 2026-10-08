@@ -37,20 +37,24 @@
   function install(options) {
     const scope = options.scope || global;
     if (installations.has(scope)) return installations.get(scope);
+    const Policy = scope.BiliSmoothDeliveryPolicy || (typeof require === 'function' ? require('../core/delivery-policy.js') : null);
     const json = scope.JSON || JSON, parse = json.parse, stringify = json.stringify;
     const fetch = scope.fetch, XHR = scope.XMLHttpRequest, RequestType = scope.Request || global.Request;
     const ResponseType = scope.Response || global.Response, HeadersType = scope.Headers || global.Headers;
     const now = () => scope.performance?.now?.() ?? Date.now();
-    const xhrPrototype = XHR?.prototype, original = { open: xhrPrototype?.open, send: xhrPrototype?.send, header: xhrPrototype?.setRequestHeader };
+    const xhrPrototype = XHR?.prototype, original = { open: xhrPrototype?.open, send: xhrPrototype?.send, header: xhrPrototype?.setRequestHeader, abort: xhrPrototype?.abort };
     const transactions = new WeakMap(), live = new Set(), readers = new Set(), restores = [], pending = new Map();
     const earlyListeners = new WeakMap(), earlyReferences = new Set();
+    const seenFragments = new Set(), pendingSynthetic = new Map();
+    const callbackProperties = ['onloadstart', 'onprogress', 'onabort', 'onerror', 'onload', 'ontimeout', 'onloadend', 'onreadystatechange'];
+    let syntheticDisabled = false;
     let disposed = false, timingObserver = null, requiresReload = false, wrappedXHR = null;
     const active = () => !disposed && options.active();
     const readUrl = value => typeof value === 'string' ? value : value?.href || value?.url || '';
     const textual = type => typeof type === 'string' && /json|text/i.test(type);
     const relevant = value => /\/x\/player|\/pgc\/player|playurl|getRoomPlayInfo|bilivideo/i.test(value || '');
     const signalText = value => typeof value === 'string' && /bilivideo|upgcxcode|mcdn|akamaized|mountaintoys|nexusedgeio|szbdyd|ahdohpiechei/i.test(value);
-    function route(value) { try { return active() ? options.route(value) : value; } catch { return value; } }
+    function route(value, detail) { try { return active() ? options.route(value, detail) : value; } catch { return value; } }
     function transform(value, source) {
       try { return options.prepare(value, source); } catch { return { value, changed: false }; }
     }
@@ -94,13 +98,13 @@
       return response;
     }
     async function sendFetch(input, init) {
-      const sourceUrl = readUrl(input), destination = route(sourceUrl);
+      let range = ''; try { range = new HeadersType(init?.headers ?? input?.headers).get('range') || ''; } catch {}
+      const sourceUrl = readUrl(input), destination = route(sourceUrl, { range, transport: 'fetch' });
       let outgoing = input, extra = init;
       if (destination && destination !== sourceUrl) {
         if (RequestType && input instanceof RequestType) { outgoing = new RequestType(destination, new RequestType(input, init)); extra = undefined; }
         else outgoing = destination;
       }
-      let range = ''; try { range = new HeadersType(init?.headers ?? input?.headers).get('range') || ''; } catch {}
       const token = begin(sourceUrl, destination, 'fetch', String(init?.method ?? input?.method ?? 'GET').toUpperCase(), range);
       const signal = extra?.signal !== undefined ? extra.signal : outgoing?.signal;
       const entry = token ? { token, signal, response: null, status: 0 } : null;
@@ -186,6 +190,47 @@
       const Weak = scope.WeakRef || global.WeakRef;
       if (Weak) { for (const ref of earlyReferences) if (!ref.deref()) earlyReferences.delete(ref); earlyReferences.add(new Weak(record)); }
     }
+    function detachEarly(xhr) {
+      const record = earlyListeners.get(xhr);
+      for (const [name, callback] of record.listeners) xhr.removeEventListener(name, callback, true);
+      record.listeners.length = 0; earlyListeners.delete(xhr);
+    }
+    function syntheticEvent(phase, checkpoint, extra = {}) {
+      options.onSynthetic?.({ type: 'synthetic-timeout', phase, id: checkpoint.id, cid: checkpoint.cid, range: checkpoint.range,
+        host: checkpoint.host, at: now(), ...extra });
+    }
+    function confirmSyntheticRetry(tx) {
+      const checkpoint = pendingSynthetic.get(tx.fragmentKey);
+      if (!checkpoint) return;
+      scope.clearTimeout(checkpoint.timer); pendingSynthetic.delete(tx.fragmentKey);
+      const delayMs = now() - checkpoint.at;
+      if (delayMs > Policy.constants.SYNTHETIC_RETRY_CHECK_MS) {
+        syntheticDisabled = true; syntheticEvent('disabled', checkpoint, { reason: 'retry-not-observed-in-time', delayMs });
+      } else syntheticEvent('retried', checkpoint, { retryId: tx.token.id, delayMs });
+    }
+    function syntheticTimeout(id) {
+      const tx = [...live].find(item => item.token?.id === id);
+      if (!active() || syntheticDisabled || !tx || tx.finished || !tx.firstAttempt || typeof tx.xhr.ontimeout !== 'function') return false;
+      const xhr = tx.xhr, callbacks = Object.fromEntries(callbackProperties.map(name => [name, xhr[name]]));
+      const checkpoint = { id, cid: tx.token.cid, range: tx.range, host: tx.token.host, at: now() };
+      // Register before player callbacks: ontimeout can synchronously send its retry.
+      pendingSynthetic.set(tx.fragmentKey, checkpoint);
+      checkpoint.timer = scope.setTimeout(() => {
+        pendingSynthetic.delete(tx.fragmentKey); syntheticDisabled = true;
+        syntheticEvent('disabled', checkpoint, { reason: 'retry-not-observed-in-time' });
+      }, Policy.constants.SYNTHETIC_RETRY_CHECK_MS);
+      for (const name of callbackProperties) xhr[name] = null;
+      outcome(tx, 'synthetic-timeout'); detach(tx, true); detachEarly(xhr);
+      syntheticEvent('triggered', checkpoint);
+      Reflect.apply(original.abort, xhr, []);
+      for (const name of ['ontimeout', 'onloadend']) {
+        const event = new scope.ProgressEvent(name.slice(2));
+        Object.defineProperties(event, { target: { value: xhr }, currentTarget: { value: xhr } });
+        callbacks[name]?.call(xhr, event);
+      }
+      return true;
+    }
+    function syntheticStatus() { return { enabled: !syntheticDisabled, pending: pendingSynthetic.size > 0 }; }
     function addReaders(tx) {
       if (!relevant(tx.sourceUrl)) return;
       const xhr = tx.xhr, response = descriptor(xhr, 'response'), responseText = descriptor(xhr, 'responseText');
@@ -226,20 +271,34 @@
         detach(previous, true);
       }
       attachEarly(this); // Also support an instance created before installation.
-      const sourceUrl = readUrl(address) || String(address), url = route(sourceUrl);
+      const sourceUrl = readUrl(address) || String(address), url = sourceUrl;
       const returned = Reflect.apply(original.open, this, [method, url === sourceUrl ? address : url, ...remaining]);
       const tx = { xhr: this, sourceUrl, url, method: String(method).toUpperCase(), range: '', bytes: 0, firstByteAt: null, listeners: [], fields: [], token: null, sent: false, finished: false, loaded: false };
+      tx.openArgs = [method, ...remaining]; tx.headers = [];
       transactions.set(this, tx); live.add(tx);
       addReaders(tx); return returned;
     }
     function header(name, value) {
       const returned = Reflect.apply(original.header, this, arguments), tx = transactions.get(this);
+      if (tx) tx.headers.push([String(name), String(value)]);
       if (tx && String(name).toLowerCase() === 'range') tx.range = tx.range ? tx.range + ', ' + value : String(value);
       return returned;
     }
     function send() {
       const tx = transactions.get(this);
       if (!tx || tx.sent) return Reflect.apply(original.send, this, arguments);
+      const destination = route(tx.sourceUrl, { range: tx.range, transport: 'xhr' });
+      // Reopening OPENED/unsent XHR clears headers. Replay its original call state.
+      if (destination !== tx.url && this.readyState === 1) {
+        const { responseType, timeout, withCredentials } = this;
+        Reflect.apply(original.open, this, [tx.openArgs[0], destination, ...tx.openArgs.slice(1)]);
+        this.responseType = responseType; this.timeout = timeout; this.withCredentials = withCredentials;
+        for (const [name, value] of tx.headers) Reflect.apply(original.header, this, [name, value]);
+        tx.url = destination;
+      }
+      tx.fragmentKey = options.fragmentKey?.(tx.sourceUrl, tx.range) || null;
+      tx.firstAttempt = tx.fragmentKey !== null && !seenFragments.has(tx.fragmentKey);
+      if (tx.fragmentKey !== null) seenFragments.add(tx.fragmentKey);
       tx.sent = true; tx.startedAt = now(); tx.hiddenOverlap = !!scope.document?.hidden; tx.token = begin(tx.sourceUrl, tx.url, 'xhr', tx.method, tx.range);
       listen(tx, 'progress', event => { tx.bytes = Math.max(tx.bytes, Number(event.loaded) || 0); transfer(tx.token, { status: Number(tx.xhr.status) || 0, responseUrl: tx.xhr.responseURL || '', bytes: tx.bytes, outcome: 'progress', ...measured(tx, tx.bytes) }, 'progress'); });
       listen(tx, 'load', () => { if (transactions.get(tx.xhr) === tx && tx.xhr.readyState === 4) { tx.loaded = true; tx.prepare?.(); } });
@@ -251,7 +310,7 @@
         outcome(tx, success ? 'complete' : status ? 'http-error' : 'network-error', success, event.loaded);
         detach(tx, false);
       });
-      try { return Reflect.apply(original.send, this, arguments); }
+      try { const result = Reflect.apply(original.send, this, arguments); confirmSyntheticRetry(tx); return result; }
       catch (error) { outcome(tx, 'cancelled'); detach(tx, false); throw error; }
     }
     if (xhrPrototype && original.open && original.send) {
@@ -281,6 +340,8 @@
     function destroy() {
       if (disposed) return;
       disposed = true; timingObserver?.disconnect();
+      for (const checkpoint of pendingSynthetic.values()) scope.clearTimeout(checkpoint.timer);
+      pendingSynthetic.clear();
       scope.document?.removeEventListener?.('visibilitychange', onVisibilityChange);
       for (const entry of pending.values()) removeFetch(entry);
       for (const tx of [...live]) detach(tx, true);
@@ -298,7 +359,7 @@
       if (xhrPrototype?.setRequestHeader === header) xhrPrototype.setRequestHeader = original.header;
       for (const restore of restores.reverse()) restore(); installations.delete(scope);
     }
-    const api = { destroy, get requiresReload() { return requiresReload; } };
+    const api = { destroy, syntheticTimeout, syntheticStatus, get requiresReload() { return requiresReload; } };
     installations.set(scope, api);
     for (const name of ['__playinfo__','__INITIAL_STATE__','__NEPTUNE_IS_MY_WAIFU__']) connectGlobal(name);
     if (options.sharingPolicy) { requiresReload = true; protectCapabilitySlots(scope, options.onSharingBlock); }

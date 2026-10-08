@@ -32,36 +32,42 @@ open(sys.argv[2],'wb').write(k.private_bytes(serialization.Encoding.PEM,serializ
   return { cert: await fs.readFile(pem), key: await fs.readFile(key) };
 }
 
-function html(metadata, init, clusterOffset) {
+function html(metadata, init, clusterOffset, synthetic = false) {
+  const mediaPath = synthetic ? '/upgcxcode/startup/101-1-30016.m4s' : '/upgcxcode/startup/video.m4s';
   return `<!doctype html><html><head><meta charset="utf-8"><title>Isolated native startup recovery</title></head>
 <body><button id="start">Start native startup fixture</button><div class="bpx-player-container"><video muted playsinline style="width:640px;height:360px"></video></div>
 <script>(()=>{
 const video=document.querySelector('video'),state={events:[],requests:[],errors:[],frames:0,firstFrameAt:null,startedAt:null,started:false};
 const init=Uint8Array.from(atob(${JSON.stringify(init.toString('base64'))}),c=>c.charCodeAt(0));
-let source,buffer;
+let source,buffer;const synthetic=${synthetic};
 for(const name of ['loadedmetadata','loadeddata','seeking','seeked','waiting','playing','pause','error'])video.addEventListener(name,()=>state.events.push({name,at:performance.now(),readyState:video.readyState,paused:video.paused,seeking:video.seeking}));
 function frame(now,data){state.frames++;if(state.firstFrameAt===null)state.firstFrameAt=now;state.lastFrame={at:now,time:data.mediaTime};video.requestVideoFrameCallback(frame);}
 function append(bytes){return new Promise((resolve,reject)=>{const done=()=>{cleanup();resolve();},fail=()=>{cleanup();reject(Error('append failed'));},cleanup=()=>{buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);};buffer.addEventListener('updateend',done);buffer.addEventListener('error',fail);buffer.appendBuffer(bytes);});}
 function request(attempt=0){
  const record={attempt,at:performance.now(),requestedTarget:BiliSmoothSession.getState().targetHost,outcome:'pending'};state.requests.push(record);
- const xhr=new XMLHttpRequest();xhr.open('GET','https://${A}/upgcxcode/startup/video.m4s');xhr.responseType='arraybuffer';xhr.timeout=10000;
+ const xhr=new XMLHttpRequest();xhr.open('GET','https://${A}${mediaPath}');xhr.responseType='arraybuffer';xhr.timeout=10000;
  xhr.setRequestHeader('Range','bytes=${clusterOffset}-${metadata.videoBytes - 1}');
  // Registered before send, just as a player owns its request timeout/retry.
- xhr.addEventListener('timeout',()=>{record.outcome='timeout';record.finishedAt=performance.now();record.retryTarget=BiliSmoothSession.getState().targetHost;
-  if(attempt<1)request(attempt+1);else state.errors.push('both requests timed out');});
- xhr.addEventListener('progress',event=>{record.bytes=event.loaded;});
- xhr.addEventListener('error',()=>{record.outcome='error';state.errors.push('XHR network error');});
- xhr.addEventListener('load',()=>{record.outcome='complete';record.status=xhr.status;record.finishedAt=performance.now();record.responseBytes=xhr.response.byteLength;
+ const handlers={
+ timeout:()=>{record.outcome='timeout';record.finishedAt=performance.now();record.retryTarget=BiliSmoothSession.getState().targetHost;
+  if(attempt<1)request(attempt+1);else state.errors.push('both requests timed out');},
+ progress:event=>{record.bytes=event.loaded;},
+ error:()=>{record.outcome='error';state.errors.push('XHR network error');},
+ load:()=>{record.outcome='complete';record.status=xhr.status;record.finishedAt=performance.now();record.responseBytes=xhr.response.byteLength;
   if(xhr.status!==206){state.errors.push('HTTP '+xhr.status);return;}
-  append(xhr.response).then(()=>{source.endOfStream();return video.play();}).catch(error=>state.errors.push(String(error)));});
+  append(xhr.response).then(()=>{source.endOfStream();return video.play();}).catch(error=>state.errors.push(String(error)));},
+ loadend:()=>{record.loadendAt=performance.now();}};
+ for(const [name,handler] of Object.entries(handlers))if(synthetic)xhr['on'+name]=handler;else xhr.addEventListener(name,handler);
+ if(synthetic){xhr.onabort=()=>state.errors.push('player abort callback was not detached');record.readyStates=[];xhr.onreadystatechange=()=>record.readyStates.push(xhr.readyState);}
  xhr.send();
+ if(synthetic&&attempt===0)setTimeout(()=>{BiliSmoothPlaybackKernel.create().testRoutes();},1000);
 }
 async function start(){if(state.started)return;state.started=true;state.startedAt=performance.now();
- const payload={data:{dash:{video:[{id:80,baseUrl:'https://${A}/upgcxcode/startup/video.m4s',backupUrl:[],width:640,height:360,frame_rate:'30'}]}}};
+ const payload={data:{dash:{video:[{id:80,baseUrl:'https://${A}${mediaPath}',backupUrl:[],width:640,height:360,frame_rate:'30'}]}}};
  window.__playinfo__=payload;source=new MediaSource();video.src=URL.createObjectURL(source);
  await new Promise(resolve=>source.addEventListener('sourceopen',resolve,{once:true}));buffer=source.addSourceBuffer(${JSON.stringify(metadata.videoType)});source.duration=${metadata.durationSeconds};
  video.requestVideoFrameCallback(frame);const metadataReady=new Promise(resolve=>video.addEventListener('loadedmetadata',resolve,{once:true}));await append(init);await metadataReady;
- video.currentTime=2;state.beforeRequest={paused:video.paused,seeking:video.seeking,readyState:video.readyState,frames:state.frames};request();
+ if(synthetic)void video.play();else video.currentTime=2;state.beforeRequest={paused:video.paused,seeking:video.seeking,readyState:video.readyState,frames:state.frames};request();
 }
 window.startupFixture={state,snapshot:()=>({at:performance.now(),currentTime:video.currentTime,readyState:video.readyState,paused:video.paused,seeking:video.seeking,frames:state.frames,error:video.error?.code??null,
  native:{clock:Function.prototype.toString.call(Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentTime').get).includes('[native code]'),ready:Function.prototype.toString.call(Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'readyState').get).includes('[native code]'),rvfc:Function.prototype.toString.call(video.requestVideoFrameCallback).includes('[native code]'),noOwn:['currentTime','readyState','requestVideoFrameCallback'].every(key=>!Object.hasOwn(video,key))},
@@ -69,8 +75,8 @@ window.startupFixture={state,snapshot:()=>({at:performance.now(),currentTime:vid
 })();</script></body></html>`;
 }
 
-async function run(adaptive, directory, server, metadata, video, clusterOffset) {
-  const name = adaptive ? 'adaptive' : 'legacy-control', run = { name, adaptive, pageErrors: [], networkErrors: [] };
+async function run(adaptive, directory, server, metadata, video, clusterOffset, synthetic = false) {
+  const name = synthetic ? 'synthetic-first-fragment' : adaptive ? 'adaptive' : 'legacy-control', run = { name, adaptive, synthetic, pageErrors: [], networkErrors: [] };
   const profile = await fs.mkdtemp(path.join(directory, name + '-')), extension = path.join(profile, 'extension');
   await fs.cp(path.join(root, 'dist/extension'), extension, { recursive: true });
   await assertBuildMatches(root, extension);
@@ -88,7 +94,7 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset) 
     await context.grantPermissions(['local-network-access'], { origin: 'https://www.bilibili.com' });
     await context.route('**/*', route => {
       const url = new URL(route.request().url());
-      if (url.href === pageUrl) return route.fulfill({ contentType: 'text/html', body: html(metadata, video.subarray(0, clusterOffset), clusterOffset) });
+      if (url.href === pageUrl) return route.fulfill({ contentType: 'text/html', body: html(metadata, video.subarray(0, clusterOffset), clusterOffset, synthetic) });
       if (url.pathname.startsWith('/upgcxcode/') && /\.bilivideo\.com$/.test(url.hostname)) {
         const target = new URL(`https://127.0.0.1:${server.address().port}${url.pathname}`);
         target.searchParams.set('run', name); target.searchParams.set('host', url.hostname); return route.continue({ url: target.href });
@@ -137,12 +143,24 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset) 
       if (request.method === 'OPTIONS') { response.writeHead(204, headers); response.end(); return; }
       const range = /^bytes=(\d+)-(\d+)$/.exec(request.headers.range || '');
       const start = range ? Number(range[1]) : 0, end = range ? Number(range[2]) : video.length - 1, body = video.subarray(start, end + 1);
-      const row = { name, host, range: request.headers.range || null, at: Date.now(), outcome: host === A ? 'partial-body-hang' : 'complete' }; network.push(row);
+      const hangs = name === 'synthetic-first-fragment' ? host !== B : host === A;
+      const row = { name, host, range: request.headers.range || null, at: Date.now(), outcome: hangs ? name === 'synthetic-first-fragment' ? 'zero-body-hang' : 'partial-body-hang' : 'complete' }; network.push(row);
       response.writeHead(206, { ...headers, 'Content-Length': String(body.length), 'Content-Range': `bytes ${start}-${end}/${video.length}` }); response.flushHeaders();
-      if (host === A) response.write(body.subarray(0, 128)); else response.end(body);
+      if (hangs) { if (name !== 'synthetic-first-fragment') response.write(body.subarray(0, 128)); } else response.end(body);
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const [adaptive, legacy] = await Promise.all([run(true, directory, server, metadata, video, clusterOffset), run(false, directory, server, metadata, video, clusterOffset)]);
+    const synthetic = await run(true, directory, server, metadata, video, clusterOffset, true);
+    const [first, retry] = synthetic.fixture?.requests || [];
+    check('synthetic: first fragment hangs, retries on the winner and decodes within two seconds',
+      first?.outcome === 'timeout' && (first.bytes || 0) === 0 && retry?.outcome === 'complete' && retry.status === 206
+      && retry.at - first.at < 2000 && synthetic.fixture.firstFrameAt - first.at < 2000 && synthetic.final?.frames >= 10
+      && synthetic.fixture.beforeRequest.frames === 0 && synthetic.fixture.beforeRequest.readyState === 1
+      && network.some(row => row.name === synthetic.name && row.host === B && row.outcome === 'complete')
+      && !synthetic.fatal && !synthetic.fixture.errors.length && !synthetic.pageErrors.length && !synthetic.final.error
+      && Object.values(synthetic.final.native).every(Boolean),
+      { requests: synthetic.fixture?.requests, firstFrameAt: synthetic.fixture?.firstFrameAt, fatal: synthetic.fatal,
+        errors: synthetic.fixture?.errors, pageErrors: synthetic.pageErrors });
     for (const row of [adaptive, legacy]) {
       check(row.name + ': real paused metadata-only startup before any frame', row.fixture?.beforeRequest.paused && row.fixture.beforeRequest.frames === 0 && row.fixture.beforeRequest.readyState === 1, row.fixture?.beforeRequest);
       const first = row.fixture?.requests[0];
