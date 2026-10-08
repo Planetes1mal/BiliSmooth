@@ -12,14 +12,17 @@ Switch Bilibili video CDNs and see download speed, playable buffer time, and pla
 
 BiliSmooth helps you manage Bilibili video playback when a delivery route is slow. A small floating panel shows download speed and how much buffered video remains at your current playback speed.
 
-The extension reads the active Bilibili page's title, URL, playback information, and media addresses for these controls. Analysis and settings stay in your browser. Playback and route probes connect to Bilibili/CDN services, which receive your IP address and signed media URLs; compatibility relays also receive the original media URL. There is no developer telemetry or automatic diagnostic upload.
+The extension reads the active Bilibili page's title, URL, playback information, and media addresses for these controls. Analysis and settings stay in your browser. Playback and route comparisons connect to Bilibili/CDN services, which receive your IP address and signed media URLs; compatibility relays also receive the original media URL. There is no developer telemetry or automatic diagnostic upload.
+
+No additional route probes run at playback startup. Candidate routes are compared when handling slow or failed requests, or when you click “Test other routes.” Each comparison uses up to two routes, with one Range request per route for up to 768 KiB of media body data. The total is at most 1.5 MiB (2 × 768 KiB, or 1,572,864 bytes); normal playback and network protocol overhead are separate.
 
 WHAT YOU CAN DO
 
 • View playback status, download speed, and playable buffer without leaving the video.
-• Let BiliSmooth choose a delivery route, or select one manually.
-• Try another route when playback stalls, with optional automatic recovery.
-• Open a separate dashboard for playback controls and video selection.
+• Start automatic playback on a route supplied by Bilibili, then use the current video's actual transfers to decide whether to switch. PCDN and MCDN compatibility handling still applies.
+• Manually fix a bilivideo route. Akamai is used only through addresses supplied for the current video and cannot be a fixed target.
+• Use “Test other routes” without saving playback settings. “Reset network records” clears the current session's network state and the current region's history. It retains other regions and does not start a speed test.
+• Open the dashboard to change settings, select a video tab, and view this video session's route comparisons and switches.
 • Choose English or Chinese, light or dark appearance, and the floating panel's position and visible metrics.
 
 HOW TO USE

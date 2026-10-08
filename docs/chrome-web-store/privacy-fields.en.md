@@ -38,6 +38,14 @@ All extension JavaScript, including the Motion animation library, is bundled in 
 
 The signed URL's contents are determined by Bilibili, including when a user is logged in. They are not stripped before media delivery because they may be required to retrieve that media. In relay mode, the complete original media URL is included in the relay request. Signed URLs are excluded from diagnostic exports and persistent extension caches.
 
+## Route comparisons and local history
+
+No additional route probes run at playback startup. When a video request is slow or fails, or the user selects “Test other routes,” the extension may compare up to two candidate CDN routes. Each route uses a single Range request for at most 768 KiB of media body data. The combined limit is 1.5 MiB per comparison (2 × 768 KiB, or 1,572,864 bytes), excluding normal playback and network protocol overhead. Comparison requests omit browser cookies while retaining the media URL parameters required by the content provider.
+
+Local history stores CDN host comparison results and failure times by browser time zone and language. Older measurements lose weight with a three-day half-life. Failures within the last hour place that host behind other candidates. History only orders comparison candidates; it does not choose the video's starting route. It contains no complete media URL or signed parameters.
+
+Session diagnostics include comparisons, switches, and fragment retry records. They remain on the device unless the user exports and separately shares them. “Reset network records” clears the current session's network state and the current region's route history without initiating a comparison. Other regions remain unchanged.
+
 ## Data use statements
 
 - BiliSmooth does not sell user data or transfer it to advertising platforms or data brokers.

@@ -2,18 +2,21 @@
 
 ## 执行边界
 
-Manifest V3 在匹配的 B站页面 document_start 装载 MAIN 世界的 `playback.js`，并以隔离世界 `content.js` 连接扩展后台。播放协调器是唯一负责探测、排名、目标和恢复的模块；两个界面只消费状态并提交命令。Chrome/Edge 最低版本为 120，与 Motion 本地构建目标一致。
+Manifest V3 在匹配的 B站页面 document_start 装载 MAIN 世界的 `playback.js`，并以隔离世界 `content.js` 连接扩展后台。播放协调器是唯一负责当前视频的测量、竞速、请求目标和恢复的模块；两个界面只消费状态并提交命令。Chrome/Edge 最低版本为 120，与 Motion 本地构建目标一致。
 
 | 模块 | 职责 |
 | --- | --- |
 | src/core/settings.js | v4 配置白名单、默认值、候选节点和字段校验 |
 | src/core/routing-policy.js | 纯地址分析、改写计划与播放信息准备 |
 | src/core/media-observer.js | 被动音视频目录、请求身份及 URL 别名 |
-| src/core/playback-feedback.js | 有界播放反馈和排序证据 |
+| src/core/delivery-session.js | 每个 cid 的媒体表示、所需码率和原生签名地址 |
+| src/core/throughput.js | 已完成视频请求的 goodput、首字节和近期窗口 |
+| src/core/delivery-policy.js | 纯判定与集中的测量、竞速、恢复和历史阈值 |
+| src/core/playback-feedback.js | 按地区保存竞速历史与失败时间，只排列挑战者 |
 | src/page/frame-monitor.js | rVFC、质量计数和时钟活性证据 |
-| src/page/network-probe.js | 有界、可取消采样；返回结果，不选线 |
-| src/page/request-interceptor.js | JSON/播放信息、Fetch/XHR 等浏览器接入；执行地址决策 |
-| src/page/playback-kernel.js | 唯一探测代次、排名、请求归属和恢复协调器 |
+| src/page/network-probe.js | 两路有界 Range 竞速；返回实测结果，不决定视频目标 |
+| src/page/request-interceptor.js | JSON/播放信息、Fetch/XHR 接入、请求测量及受限合成超时 |
+| src/page/playback-kernel.js | 每视频竞速、保持、片段重试、请求归属与恢复协调器 |
 | src/page/passive-session.js | 播放观察、开播/卡顿摘要、保存确认、视图快照和诊断 |
 | src/page/control-bridge.js | 命令白名单、保存确认及刷新顺序 |
 | src/extension/background.js | 串行配置权威、仪表盘复用与文档升级 |
@@ -34,23 +37,27 @@ Manifest V3 在匹配的 B站页面 document_start 装载 MAIN 世界的 `playba
 const policy = BiliSmoothRoutingPolicy.createPolicy(config);
 policy.route(rawUrl);          // { changed, original, url, reason, targetHost? }
 policy.describe(rawUrl);       // 地址类别和媒体/直播等事实
-policy.prepare(payload, { ranking });
-// { value, changed, rewrites, sampleUrl }
+policy.prepare(payload);
+// { value, changed, rewrites }
 
 BiliSmoothRoutingPolicy.addressForHost(rawUrl, host); // 改写后的地址字符串
 ```
 
-`createPolicy` 对配置规范化，组合地址事实、策略意图优先级与渲染方式。`route` 根据模式、节点选择和兼容策略给出结果，直播、非媒体和不适用地址保留。`prepare` 在有变化时返回准备后的对象，收集改写记录与采样地址，并在自动模式下为媒体表示补充有界候选地址；无变化保留输入对象。
+`createPolicy` 对配置规范化，组合地址事实、策略意图优先级与渲染方式。`route` 根据模式、固定选择和兼容策略给出结果，直播、非媒体和不适用地址保留。自动实测路由由内核按会话和请求的 Range 决定；自动模式只忽略保存的 `force` 与 `rewriteAkamai`，固定模式仍采用这两个设置；`mode: off` 或关闭优化始终停用改写与竞速。`prepare` 保留原生备用地址，不扩充候选列表；兼容处理有变化时返回准备后的对象及改写记录，无变化保留输入对象。
 
-`addressForHost` 是明确的地址构造工具，用于探测目标等调用点，不自行判断目标是否应被选择。输入或目标 authority 无效时抛错；候选的业务校验由 settings 与调用点负责。
+`addressForHost` 是明确的地址构造工具，用于合法 UPOS 挑战者等调用点，不自行判断目标是否应被选择。输入或目标 authority 无效时抛错；候选的业务校验由 settings 与调用点负责。
 
 ## 观察与界面快照
 
 会话通过 `BiliSmoothSession` 和 `BiliSmoothRuntime` 提供同一 API：
 
-- `getViewState()` 返回已缓存的媒体观察、配置副本、当前缓冲/倍速、供片信息与保存状态，不再次扫描播放器、构建排名或复制日志。浮窗优先使用它。
-- `getState()` 刷新观察并组合排名、开播/恢复摘要、曲线和近期事件，供仪表盘和控制桥使用。
+- `getViewState()` 返回已缓存的媒体观察、配置副本、当前缓冲/倍速、供片信息与保存状态，不再次扫描播放器、排列挑战者或复制完整记录。浮窗优先使用它。
+- `getState()` 刷新观察并组合当前视频的线路状态、竞速与切换记录、开播/恢复摘要、曲线和近期事件，供仪表盘和控制桥使用。
 - `getDiagnostics()` 返回独立导出结构，明确去除 `videoMeta`，并限制事件、请求信息和媒体地址的字段范围。
+
+内核 `getFlags()` 返回 `{needReload, delivery}`。其中 delivery 为 `{status, nativeHost, activeHost, nextTestAt, canTest, comparedHosts}`：status 取 native/testing/switched/compared/current-fastest；nextTestAt 是 Unix epoch 毫秒；canTest 反映真实可用条件；comparedHosts 是本视频历次竞速涉及的不同主机数量，含原线路和挑战者。界面不另算冷却阈值。nativeHost 来自当前视频表示的原始 playinfo base 地址，可为 PCDN/MCDN；只有实际或请求主机与它相符时，界面才可把供片标为原生。
+
+完整 `getState().session` 另含 cid、requiredBps、representations、hosts、switchCount、nextAutomaticAt、races、switches、syntheticTimeouts、racing 和 lastRace。races 保存 at/networkEpoch/currentHost/trigger/range、挑战者、currentMs、完整样本、winner/runnerUp、switched 与 verdict；currentMs 为 null 表示无法给出有限估计。verdict 区分 switched、fragment、current-fastest、below-margin、no-completion。switches 保存时间、来源/目标主机、Range 及 fragment/video 范围；switchCount 只计全视频切换。syntheticTimeouts 为 `{enabled, pending, events}`，enabled 与 pending 为布尔值。
 
 `observedAt` 是观察时间，`hidden` 表示页面可见性；首帧之前播放器为恢复观看位置进行的跳转投影为 buffering，开播等待时长由 startup 摘要记录，不计入卡顿次数；共享 `projectPlayback(snapshot, connected)` 将它们与 media.frameHealth 投影为 disconnected、waiting、error、ended、seeking、paused、buffering、frozen、smooth 或 playing。优化关闭是独立配置状态；只有近期健康且可见的画帧证据才投影 smooth。
 
@@ -58,7 +65,7 @@ BiliSmoothRoutingPolicy.addressForHost(rawUrl, host); // 改写后的地址字�
 
 会话在已有观察周期中读取站点可见的地区限制提示、初始化数据中的视频不可用错误，以及无可播放数据时的充电专属资格字段（`is_upower_exclusive` 为 true，`is_upower_play` 与 `is_upower_preview` 为 false），输出 `availability`（region、unavailable 或 payment），不把站点门槛解释为等待、缓冲或卡顿。信号消失时清除此状态；紧凑快照不额外扫描。`-404` 本身不能证明删除或地区限制，使用中性不可用说明。该观察不新增网络请求，也不尝试获取被站点拒绝的地址。
 
-两种界面共用本地化说明和错误投影，并停用当前视频的手动重新评估及恢复动作。浮窗的当前视频线路入口停用；仪表盘的共用选线方式、线路选择和应用仍可保存，`applyRoute` 只保存全局偏好，不解除当前视频的站点门槛。`resetNetwork` 只拒绝受限视频的 manual 原因；online、connection-change 等自动网络证据重置仍执行。
+两种界面共用本地化说明和错误投影，并停用受限视频的手动线路对比及恢复动作。浮窗的当前视频线路入口停用；仪表盘的共用选线方式、线路选择和应用仍可保存，`applyRoute` 只保存全局偏好，不解除当前视频的站点门槛。`resetNetwork` 只拒绝受限视频的 manual 原因；online、connection-change 等自动网络证据重置仍执行。
 
 ## 配置和消息
 
@@ -66,11 +73,15 @@ BiliSmoothRoutingPolicy.addressForHost(rawUrl, host); // 改写后的地址字�
 
 `settings-migration.js` 在当前记录缺失时按数据结构查找偏好，并保存导入备份；不依赖产品名称别名，不改写导入源。存在多个不同的规范化配置时返回读取错误，避免静默挑选。当前 v4 始终优先。配置包含 floatingEntryEnabled、floatingEntryType、floatingEdgeSnap 白名单字段；缺失时补三态、状态 logo、轻吸附默认值，保留用户已有偏好和 schemaVersion 4。
 
-MAIN 世界同步读取启动缓存，然后接收异步权威配置。用户明确固定选择优先于自动排名；已经交付的播放信息需要新设置时，界面提示刷新。保存有唯一 ID、5 秒超时、pending/saved/error 状态；数组按内容比较确认。控制桥的刷新命令等待保存成功后才刷新页面。
+MAIN 世界同步读取启动缓存，然后接收异步权威配置。用户明确固定选择优先于自动会话路由；已经交付的播放信息需要新设置时，界面提示刷新。保存有唯一 ID、5 秒超时、pending/saved/error 状态；数组按内容比较确认。控制桥的刷新命令等待保存成功后才刷新页面。
 
-自动候选池由 `settings.js` 维护；固定列表由该池加 Akamai host 生成。媒体表示的备用地址最多 8 条，先为原站提供且与生成地址不同的备用地址保留容量，再按排名补充候选；最终选线由当前网络证据决定。
+自动候选池由 `settings.js` 维护，固定线路只接受合法的 bilivideo UPOS 主机。旧的 Akamai 固定配置迁回自动。Akamai 可以作为自动竞速候选，但必须使用 B站为当前表示下发的原始签名地址，不能从 UPOS 地址替换主机生成。原生备用地址及其顺序保留，自动模式不扩充 backupUrl。
 
-六小时排名缓存使用 `bilismooth.routing.rank.v4.` 前缀，按时区及语言区分，并在读取时恢复对应探测证据。前缀升级使旧的正文速率排名不再用于新的全程速率排序；用户设置继续使用 v4，播放反馈缓存保持 `biliSmooth.playback-feedback.v1.`。
+会话按 cid 保存表示、码率和按主机归类的下发地址。所需码率取本会话实际请求过的最高视频码率，并按当前倍速换算。自动模式从原站下发的线路开始，既有 PCDN/MCDN 兼容处理继续适用；固定模式沿用用户的目标与改写范围。原生下发主机、当前会话目标、实际请求主机与实际供片主机分别记录。
+
+`playback-feedback.js` 只导出 `createHistory`。地区键为 `bilismooth.delivery-history.v1.<时区>|<语言>`，内容是 `{version: 1, rows: [{host, meanBps, weight, measuredAt, failedAt}]}`；meanBps 单位为 bit/s，weight 是有效样本权重，两个时间字段是 Unix epoch 毫秒。`recordRace` 记录竞速结果，`recordFailure` 记录失败，`challengers` 只排序调用方传入的本视频候选；`importFailures` 只服务启动迁移，`snapshot/clear` 提供持久化快照与清除。历史以三天半衰期降低旧样本权重，只排列挑战者，不设置当前视频目标。一小时内失败的主机后置；未知主机按已测主机的下位中位数参与排序，全未知时同分，同分优先大陆镜像。每个挑战者名额有五分之一机会从同一失败等级的剩余主机中探索。
+
+创建内核时仅扫描一次 `biliSmooth.playback-feedback.v1.` 与 `bilismooth.routing.rank.v4.` 旧键。前者按原地区后缀把一小时内有效 failedAt 合并到新历史，成功写入后删除旧键；后者直接删除，不导入旧排名或探测速率。迁移和读取历史都不发起网络请求。历史读取校验合法 CDN 主机、数值和时间，不因当前视频候选不同而删除其他合法主机记录。可请求的候选仍由本视频下发地址与候选池决定，历史不产生目的地址。
 
 浮窗通过页面会话提交命令；仪表盘通过扩展消息定向到所选视频的顶层 frame。视频选择拥有代次，旧来源迟到的回复不能应用到新来源；共用设置保存和所选视频的播放状态分开处理。
 
@@ -104,15 +115,23 @@ Motion mini 与 spring 由构建打包为本地 BiliSmoothMotion。背景几何�
 
 入口、预览、面板和仪表盘共用 `surface.format.speed`。仪表盘图表只使用带时间戳的 speedSamples，已观测零值连接，未知及较长时间缺口断开；孤立真实样本显示点。图表插值仅连接已有观测，不生成历史样本。
 
-探测默认每节点读取到 768 KiB 所在的数据块为止、4 秒截止，可随新代次取消；可用样本必须收到实际字节，空 2xx 响应记为 `empty-body`。探测速率按实际字节除以包含首字节等待的完整请求耗时计算，首字节耗时另行保留。结果和真实媒体流量分开记录。请求、媒体与网络代次隔离晚到结果，避免污染新视频或排名。Fetch 正文维持原生读取语义，资源时序的未验证传输不等于稳定供片；XHR 失败在消费者同步重试前通知协调器。消费者在完成事件中复用同一 XHR 时，在原生 `open()` 清空响应前记录上一请求的完成数据。
+选线测量与界面速度图分开：goodput 只使用前台有效的已完成视频 XHR，字节除以请求发出至完成的完整 elapsed，包含首字节等待。单样本至少 16 KiB、累计至少 128 KiB 才形成可信估计；半衰期为 2 秒和 5 秒的两个平均取较低值。近期窗口保留达到 4 MiB 或 8 秒所需的完整样本，并提供首字节中位数。与隐藏时段重叠的样本不参与选线，音频和未验证 Fetch 时序不作为视频 goodput。
 
-恢复从当前有效排名首部选取本次等待尚未尝试的节点，排除探测失败的节点；有效排名和自动目标把存在未解除真实视频失败的节点排在其余候选之后；后续真实稳定供片可重新证明节点可用。同次等待保留实际卡顿线路与已选恢复目标；仅在配置中设为目标、尚未实际请求的节点不算失败尝试。实际供片与当前有效目标不同时，可以保持目标并激活恢复改写，避免跳过尚未试用或刚被真实播放提升的候选。自动恢复受用户暂停、拖动进度、后台、固定线路、关闭优化和关闭恢复等条件限制；启动阶段真实请求失败的专用恢复路径保留；正在播放时当前目标出现真实视频失败、且仍有无失败证据的候选，即使缓冲尚未耗尽也立即更换目标。手动重试成功换线后，已有等待计时器从当前时刻重新等待五秒。不主动降低画质，不强制暂停来积累缓冲。后续目标、实际请求、观察到的供片和持续恢复是不同证据。
+开播不进行全候选池探测。自动决策只遍历当前 cid、网络和媒体代次的真实在途视频 XHR；仅 waiting、frozen 或低缓冲不产生竞速。请求发出及进度/完成通知会立即求值，250 毫秒周期补充无新事件时的等待判断；播放证据需在 1500 毫秒内，隐藏重叠请求不参与。每个 cid/表示/完整 Range 自动最多竞速一次。纯判定覆盖三类触发：至少 128 KiB 的视频 Range 等待首字节达到 1 秒且缓冲不足 3 秒；或已传 0.5 秒/128 KiB、速率低于需求 1.3 倍、预计剩余超过 1 秒且晚于缓冲耗尽前 2 秒。近期 4 MiB 或 8 秒速度低于需求 1.2 倍且缓冲不足 30 秒时判为持续不足；30 秒内两次真实视频失败也可触发。条件、门槛与单位集中在 `delivery-policy.js`。
 
-自动自适应选线也在真实请求发出前核对候选池节点的失败证据，并只改写到当前有效目标：探测网络失败且尚未重新证明稳定供片的节点对所有请求生效；探测在截止前未完成采样，或近期真实视频请求超时、网络失败、HTTP 失败或约 2 秒没有任何字节即被播放器取消的节点，只对视频请求生效，且目标本身没有同类证据时才改写。真实失败记忆与排名缓存同为 6 小时并随页面刷新恢复，同一节点之后连续稳定供片即解除；“重新评估网络”和网络切换会清空。首次改写记录 `route-avoided` 关键事件。没有失败证据的原站线路、固定选择和关闭优化继续服从原有地址策略。
+竞速对该片段接下来所需的字节并行比较最多两名挑战者，每条使用一个闭合的单 Range 请求，媒体正文最多 768 KiB，每次两路合计最多 1.5 MiB（2 × 768 KiB = 1,572,864 字节），4 秒截止。HTTP/TLS 等网络协议开销与正常播放流量不在这个正文限额内。对比请求不带 Cookie，但使用播放器所需的签名地址。首个完成样本用时不超过当前线路估计的三分之二才可切换；在途零字节挂起的速率按零处理，不回退为该主机先前的高速。失败或取消的未完成竞速不冒充完整速度样本。
 
-播放器清空媒体、替换元素或请求进入新媒体代次时，清除上一媒体的临时强制换线、失败线路、本次尝试集合和恢复冷却时间。原站新媒体请求及新的等待周期由当前媒体重新判断；请求改写前先识别恢复期间的播放器替换。
+若主机此前可信 goodput 达到需求 1.2 倍且 30 秒内无真实失败，一次 stuck 只改变当前表示与完整 Range 的重试目标。会话锚定原来实际供片的健康主机，避免播放器粘住临时备用地址；之后再次挂起会看到本次失败证据。其余已测得明显更快的情况才切换整个视频。播放器请求失败后，优先使用最近竞速已完成且未在该片段失败的亚军；亚军不存在或也失败时，保留播放器本次给出的原生重试地址，不强行拉回失败目标。音频、视频各自的表示与 Range 失败记录互不混淆。
 
-诊断最多保留 200 条近期事件、800 条关键事件及 600 个状态样本。仪表盘独立限制显示条数，筛选和阅读暂停不改变诊断导出内容。
+合成超时仅用于视频 Range 的第一次尝试：摘下播放器赋值的回调，执行原生 abort，再调用其 ontimeout 与 onloadend，让播放器自己的重试逻辑使用已选地址。没有可用的属性回调时不合成；每个表示与 Range 最多一次。3 秒内未观察到同一片段重试即停用本页的合成超时，记录原因；合成动作本身不重复计为主机真实失败。
+
+每次比较产生结论后至少 10 秒内不再竞速；自动间隔之后按两倍增长，手动“测试其他线路”仍遵守至少 10 秒间隔。每个 cid 的全视频切换最多四次，手动不绕过上限。播放器替换、切回同一视频或重置网络记录都不重置该视频的切换额度和冷却。隐藏、已起播后的暂停或跳转不触发自动竞速；首帧前的实际加载等待仍按开播证据判断。不主动降低画质，也不强制暂停积累缓冲。
+
+“测试其他线路”不保存播放设置；“重置网络记录”清除当前会话网络状态和当前地区历史，其他地区历史保留，本身不触发探测或竞速。manual、online、connection-change 与 clearData 的网络重置都遵循这一范围。它会中止在途竞速、清除当前测量、临时片段目标、失败窗口与亚军，使旧 activeEpoch 失效；每个 cid 的 switchCount、冷却截止、自动竞速过的 Range 集合及已经保留的 races/switches 记录仍保留，合成超时的本页停用状态也不重置。两种界面消费同一轻量 delivery 状态与实际冷却截止时间，区分原生、正在对比、已切换、已比较和有测量支持的当前最快。挑战者略快但未达到切换门槛时仅表示已比较，不称当前最快。
+
+会话导出包含按时间排列的 races、switches、合成超时记录，以及各主机 goodput 与首字节中位数。竞速记录区分完整样本、胜者、亚军和判定；切换记录区分仅当前片段与整个视频。导出保留主机、时间和 Range，不包含签名 URL。请求、cid、表示和网络代次隔离晚到结果。Fetch 正文维持原生读取语义；XHR 完成在消费者复用同一实例前记录，失败在消费者同步重试前通知协调器。
+
+通用诊断窗口最多保留 200 条近期事件、800 条关键事件及 600 个状态样本；每视频的 races/switches 与合成超时事件在页面会话中独立保留。仪表盘独立限制显示条数，筛选和阅读暂停不改变诊断导出内容。
 
 ## 构建和验证
 
