@@ -7,7 +7,7 @@
   const RANK_PREFIX = 'bilismooth.routing.rank.v4.', FEEDBACK_PREFIX = 'biliSmooth.playback-feedback.v1.';
   const RANK_TTL_MS = 21600000, STALL_GRACE_MS = 2500, STALL_RETRY_MS = 5000;
   const PROBE_TIMEOUT_MS = 4000, PROBE_MAX_HOSTS = 12, PROBE_BYTES = 786432, EVIDENCE_MAX_AGE_MS = 1500, NO_RESPONSE_MS = 2000;
-  const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js') } : {};
+  const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js'), delivery: require('../core/delivery-session.js') } : {};
   function create(options = {}) {
     const root = options.scope || global;
     if (instances.has(root)) return instances.get(root);
@@ -15,7 +15,8 @@
     const settings = root.BiliSmoothSettings || global.BiliSmoothSettings || imported.settings;
     const RequestLayer = root.BiliSmoothRequestInterceptor || global.BiliSmoothRequestInterceptor || imported.requests;
     const Probes = root.BiliSmoothNetworkProbe || global.BiliSmoothNetworkProbe || imported.probes;
-    if (!core || !RequestLayer || !Probes) throw Error('BiliSmooth playback dependencies are unavailable');
+    const DeliverySession = root.BiliSmoothDeliverySession || global.BiliSmoothDeliverySession || imported.delivery;
+    if (!core || !RequestLayer || !Probes || !DeliverySession) throw Error('BiliSmooth playback dependencies are unavailable');
     const document = root.document, json = root.JSON || JSON;
     const nativeParse = json.parse, nativeStringify = json.stringify, nativeFetch = root.fetch;
     const plainCopy = value => Reflect.apply(nativeParse,json,[Reflect.apply(nativeStringify,json,[value])]);
@@ -24,6 +25,7 @@
     const every = (root.setInterval || global.setInterval).bind(root), clearEvery = (root.clearInterval || global.clearInterval).bind(root);
     let config = settings.normalize(options.config), destroyed = false, interceptor = null;
     let policy = core.createPolicy(config);
+    const delivery = DeliverySession.create({ pool: config.candidatePool }), preparedPayloads = new WeakSet();
     let watchedVideo = null, watchTimer = null, stallTimer = null, stallDeadlineAt = null, rotateCursor = 0;
     let requestSerial = 0, networkEpoch = 0, feedbackGeneration, recentVideoFailure = null, lastVideoHost = null, lastRecoveryAt = -Infinity;
     let feedback = null, probeEpoch = 0, probeRound = null, probed = false, lastSample = null;
@@ -92,8 +94,10 @@
     }
     function prepare(value, source) {
       if(!value||typeof value!=='object')return {value,changed:false};
+      if (!preparedPayloads.has(value)) delivery.collect(value);
       let original;try{original=plainCopy(value);}catch{original=null;}
       const prepared=policy.prepare(value,{ranking:state.ranking});
+      preparedPayloads.add(prepared.value);
       record(prepared.rewrites,source);emit({type:'payload',source,original,prepared:prepared.value,payload:prepared.value});
       if(active()&&prepared.sampleUrl){lastSample=prepared.sampleUrl;scheduleProbe(lastSample);}
       return prepared;
@@ -181,6 +185,7 @@
       watchVideo();
       let kind = 'unknown';
       try { kind = options.classifyRequest?.(originalUrl, url) || kind; } catch (_) {}
+      delivery.request(originalUrl) || delivery.request(url);
       const evidence = playbackEvidence();
       const generation = evidence?.mediaGeneration ?? requestGeneration();
       if (generation !== feedbackGeneration) {
@@ -346,7 +351,7 @@
     }
     function getConfig(){return plainCopy(config);}
     function getFlags(){return {needReload:state.needReload,probing:state.probing};}
-    function getState(){return {...plainCopy(state),config:getConfig(),effectiveRanking:recoveryCandidates(),playbackFeedback:feedback?.snapshot()||null};}
+    function getState(){return {...plainCopy(state),config:getConfig(),effectiveRanking:recoveryCandidates(),playbackFeedback:feedback?.snapshot()||null,session:delivery.snapshot()};}
     function retry(){
       if(!active()||config.selection!=='auto'||!rotateTarget(stallingHost(),'manual'))return false;
       state.recoveries++;

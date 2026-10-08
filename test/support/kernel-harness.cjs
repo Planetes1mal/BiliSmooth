@@ -52,8 +52,8 @@ module.exports = function load(options = {}) {
   if (options.fetch) scope.fetch = async (input, init) => { calls.push({ input, init }); return options.fetch(input, init, { advance: ms => time += ms, scope }); };
   Object.assign(scope, options.globals || {}); scope.globalThis = scope; scope.window = scope;
   const native = { json: scope.JSON.parse, parse: scope.JSON.parse, fetch: scope.fetch, open: XHR.prototype.open, send: XHR.prototype.send };
-  const files = ['src/core/settings.js', 'src/core/routing-policy.js',
-    ...(session ? ['src/core/media-observer.js', 'src/page/frame-monitor.js', 'src/core/playback-feedback.js'] : []),
+  const files = ['src/core/settings.js', 'src/core/routing-policy.js', 'src/core/media-observer.js', 'src/core/delivery-session.js',
+    ...(session ? ['src/page/frame-monitor.js', 'src/core/playback-feedback.js'] : []),
     'src/page/network-probe.js', 'src/page/request-interceptor.js', 'src/page/playback-kernel.js'];
   let kernel, api;
   if (options.kernel) {

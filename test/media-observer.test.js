@@ -67,3 +67,42 @@ test('Browser global keeps signatures only in memory, exposes no preparation or 
   catalog.collect({ dash: { video: [video(1)] } }); catalog.request(url(1)); assert.ok(catalog.get(url(1)).url.includes('PRIVATE_1')); assert.ok(!catalog.get(url(1)).resourceId.includes('PRIVATE'));
   catalog.clear(); assert.equal(catalog.get(url(1)), null); assert.equal(catalog.activeVideo(), null); assert.equal(catalog.tracks().length, 0);
 });
+
+test('delivery sessions retain native signatures, derive only UPOS mirrors and remember requested video demand', () => {
+  const Delivery = require('../src/core/delivery-session.js'), load = require('./support/kernel-harness.cjs');
+  const cosov = 'upos-sz-mirrorcosov.bilivideo.com', akamai = 'upos-hz-mirrorakam.akamaized.net', mirror = 'upos-tf-all-hw.bilivideo.com';
+  const issued = (host, file, sign) => `https://${host}/upgcxcode/05/91/${file}?os=${host === akamai ? 'akam' : 'cosovbv'}&sign=${sign}%2Bprivate`;
+  const rows = [[7, 'avc1.640033', 30064, 4000000, cosov], [12, 'hev1.2.4.L153', 30080, 8000000, cosov], [13, 'av01.0.12M.10', 30120, 9000000, akamai]];
+  const videos = rows.map(([codecid, codecs, rep, bandwidth, primary]) => {
+    const file = `42231991605-1-${rep}.m4s`, backup = primary === akamai ? cosov : akamai;
+    return { id: 120, codecid, codecs, bandwidth, baseUrl: issued(primary, file, 'native'), backupUrl: [issued(backup, file, 'backup')] };
+  });
+  const audio = { id: 30280, bandwidth: 99000000, baseUrl: issued(cosov, '42231991605-1-30280.m4s', 'audio') };
+  const payload = { data: { dash: { video: videos, audio: [audio] } } }, before = JSON.stringify(payload), delivery = Delivery.create();
+  delivery.collect(payload); assert.equal(delivery.snapshot().requiredBps, 0);
+  for (const item of videos) {
+    const rep = delivery.request(item.baseUrl), native = [item.baseUrl, ...item.backupUrl];
+    assert.equal(rep.codecId, item.codecid); assert.equal(delivery.snapshot().requiredBps, item.bandwidth);
+    for (const raw of native) assert.equal(delivery.addressForHost(item.baseUrl, new URL(raw).hostname), raw);
+    const upos = native.find(raw => new URL(raw).hostname === cosov), derived = upos.replace(cosov, mirror);
+    assert.equal(delivery.addressForHost(item.baseUrl, mirror), derived); assert.equal(delivery.get(derived), rep);
+    assert.equal(delivery.addressForHost(item.baseUrl, 'upos-sz-mirrorakam.akamaized.net'), null);
+  }
+  delivery.request(videos[0].baseUrl); delivery.request(audio.baseUrl); assert.equal(delivery.snapshot().requiredBps, 9000000);
+  const refreshed = structuredClone(payload); refreshed.data.dash.video[2].backupUrl[0] += '&deadline=456';
+  delivery.collect(refreshed); assert.equal(delivery.addressForHost(videos[2].baseUrl, cosov), refreshed.data.dash.video[2].backupUrl[0]);
+  assert.equal(delivery.snapshot().requiredBps, 9000000); assert.equal(JSON.stringify(payload), before);
+  assert.doesNotMatch(JSON.stringify(delivery.snapshot()), /https?:|private|sign=|deadline=/);
+  const onlyAkamai = Delivery.create(); onlyAkamai.collect({ dash: { video: [{ ...videos[2], backupUrl: [] }] } });
+  assert.equal(onlyAkamai.addressForHost(videos[2].baseUrl, mirror), null, 'Akamai signatures never seed mirror addresses');
+  const other = { ...videos[0], baseUrl: videos[0].baseUrl.replace('42231991605', '42242147914'), backupUrl: [] };
+  delivery.collect({ dash: { video: [other] } }); delivery.request(other.baseUrl);
+  assert.deepEqual([delivery.snapshot().cid, delivery.snapshot().requiredBps], ['42242147914', other.bandwidth]);
+  delivery.request(videos[2].baseUrl); assert.equal(delivery.snapshot().requiredBps, 9000000);
+  const h = load(); h.scope.__playinfo__ = h.scope.JSON.parse(before);
+  for (const item of videos) h.xhr(item.baseUrl);
+  const session = h.state().session; h.api.destroy();
+  assert.equal(session.requiredBps, 9000000);
+  assert.ok(session.representations.every(rep => rep.issuedHosts.length === (rep.kind === 'audio' ? 1 : 2)));
+  assert.doesNotMatch(JSON.stringify(session), /https?:|private|sign=/);
+});

@@ -15,7 +15,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const pkg = JSON.parse(await readFile(inside('package.json'), 'utf8'));
 const motionInputs = await buildMotion();
 const files = ['src/core/settings.js', 'src/core/routing-policy.js', 'src/core/media-observer.js',
-  'src/core/playback-feedback.js', 'src/page/frame-monitor.js', 'src/page/network-probe.js',
+  'src/core/delivery-session.js', 'src/core/playback-feedback.js', 'src/page/frame-monitor.js', 'src/page/network-probe.js',
   'src/page/request-interceptor.js', 'src/page/playback-kernel.js',
   'src/page/passive-session.js', 'src/page/control-bridge.js',
   'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js', 'src/page/floating-control.js'];
