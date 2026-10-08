@@ -6,7 +6,7 @@ function bridge() {
   let settle, reject, persisted = Promise.resolve();
   const session = { getState: () => ({ version: '2.3.0' }), getDiagnostics: () => ({ events: ['retained'] }),
     setConfig: patch => calls.push(patch), flushSettings: () => persisted,
-    reload: () => true, boost: () => true, applyRoute: host => settings.isCdnHost(host),
+    reload: () => true, applyRoute: host => settings.isCdnHost(host),
     resetNetwork() {}, clearEvents() {}, clearData() {}, retry: () => false };
   const scope = { BiliSmoothSession: session, BiliSmoothSettings: settings,
     location: { origin: 'https://www.bilibili.com', reload: () => calls.push('reload') },

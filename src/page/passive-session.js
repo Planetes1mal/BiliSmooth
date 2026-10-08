@@ -522,7 +522,6 @@
     getState: state, getViewState: viewState, getConfig: () => clone(config), setConfig: save, flushSettings,
     applyRoute(host) { if (!settings.isCdnHost(host)) return false; save({ enabled: true, selection: 'fixed', pcdnHost: host, mode: config.mode === 'off' ? 'bad-only' : config.mode }); return true; },
     retry() { refresh(); if (availability) return false; const result = kernel.retry(); notify(); return result !== false; }, resetNetwork,
-    boost() { refresh(); if (availability) return false; save({ enabled: true, mode: 'force' }); return true; },
     reload() { persist(); return true; },
     clearEvents() { clearLogs(); notify(); },
     clearData() { endEpisode('clear-data'); save(settings.defaults); resetNetwork('clear-data'); clearLogs(); for (const key of Object.keys(counters)) counters[key] = 0; notify(); },

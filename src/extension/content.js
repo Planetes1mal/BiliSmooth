@@ -75,7 +75,7 @@
     clearTimeout(request.timer); pending.delete(event.data.id);
     request.reply(event.data.ok ? { ok: true, result: event.data.result } : { ok: false, error: event.data.error || 'command-failed' });
   });
-  const commands = new Set(['state', 'config', 'reset', 'retry', 'applyRoute', 'clearData', 'clearEvents', 'diagnostics', 'boost', 'reload', 'resetFloatingPosition']);
+  const commands = new Set(['state', 'config', 'reset', 'retry', 'applyRoute', 'clearData', 'clearEvents', 'diagnostics', 'reload', 'resetFloatingPosition']);
   api.runtime.onMessage.addListener((message, sender, reply) => {
     if (sender.id !== api.runtime.id || message?.channel !== 'bilismooth' || !commands.has(message.action)) return;
     if (pending.size >= 8) { reply({ ok: false, error: 'busy' }); return; }

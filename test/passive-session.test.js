@@ -75,7 +75,6 @@ test('site gates block manual recovery while preserving shared settings and auto
     assert.equal(h.api.getConfig().pcdnHost, B);
     assert.equal(h.api.retry(), false);
     assert.equal(h.api.resetNetwork(), false);
-    assert.equal(h.api.boost(), false);
     assert.deepEqual(h.calls, ['config'], 'manual playback actions stay blocked without preventing settings saves');
     h.scope.emit('online');
     h.scope.navigator.connection.type = 'cellular'; h.scope.navigator.connection.emit('change');
@@ -146,11 +145,10 @@ test('cached or early automatic ranking survives first storage handshake but nev
   fixed.message({ __bilismoothConfig: 'config', config: { selection: 'fixed', pcdnHost: A } });
   assert.equal(fixed.api.getState().targetHost, A); assert.equal(fixed.api.getState().config.selection, 'fixed');
 });
-test('fixed route preserves mode and boost exposes a storage acknowledgement before bridge reload', async () => {
+test('fixed route preserves mode and exposes a storage acknowledgement', async () => {
   const h = harness({ noPlayer: true }); h.message({ __bilismoothConfig: 'config', config: {} });
   assert.equal(h.api.applyRoute(B), true); assert.equal(h.api.getConfig().selection, 'fixed'); assert.equal(h.api.getConfig().mode, 'bad-only');
   assert.equal(h.api.applyRoute('attacker.example'), false);
-  h.api.boost(); assert.equal(h.api.getConfig().mode, 'force'); assert.equal(h.reloads(), 0);
   const message = h.messages.filter(row => row.id).at(-1);
   h.message({ __bilismoothConfig: 'saved', id: 'unrelated', ok: true }); assert.equal(h.reloads(), 0);
   assert.equal(h.api.getState().settingsSave.status, 'pending');
