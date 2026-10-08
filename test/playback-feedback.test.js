@@ -31,6 +31,8 @@ test('Refresh preserves confirmed evidence while failure and stability expire du
   assert.deepEqual(restored.rank(hosts), [COS, HW, ALIOV]);
   time.advance(120000); assert.deepEqual(restored.rank(hosts), [COS, ALIOV, HW]);
   time.advance(480000); assert.deepEqual(restored.rank(hosts), [ALIOV, HW, COS]);
+  assert.equal(restored.failing(ALIOV), true, 'route avoidance outlives the ranking penalty');
+  time.advance(21000000); assert.equal(restored.failing(ALIOV), false);
   assert.deepEqual(restored.snapshot(), { version: 1, rows: [] });
 });
 
@@ -111,7 +113,7 @@ test('Even when every candidate times out, the original candidate set and tie or
   const input = [...hosts]; assert.deepEqual(history.rank(input), [ALIOV, HW, COS]);
   assert.deepEqual(input, [ALIOV, HW, COS], 'ranking does not mutate the probe ranking');
   time.advance(120000); assert.deepEqual(history.rank(hosts), [ALIOV, HW, COS]);
-  assert.deepEqual(history.snapshot(), { version: 1, rows: [] });
+  time.advance(21480000); assert.deepEqual(history.snapshot(), { version: 1, rows: [] });
 });
 
 test('A burst of successful requests and hosts outside the allowlist cannot manufacture stability', () => {

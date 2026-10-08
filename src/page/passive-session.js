@@ -481,13 +481,14 @@
     const playbackFeedback = k.playbackFeedback?.version === 1 ? { version: 1,
       rows: (Array.isArray(k.playbackFeedback.rows) ? k.playbackFeedback.rows : []).filter(row => settings.candidatePool.includes(row?.host)).slice(0, 16).map(row => ({
         host: row.host, stableAt: Number.isFinite(row.stableAt) && row.stableAt > 0 ? row.stableAt : 0,
+        failedAt: Number.isFinite(row.failedAt) && row.failedAt > 0 ? row.failedAt : 0,
         timeouts: (Array.isArray(row.timeouts) ? row.timeouts : []).filter(at => Number.isFinite(at) && at > 0).slice(-16) })) } : null;
     const totals = { ...counters, totalStallMs: counters.totalStallMs + (activeEpisode?.observedStallMs || 0) };
     const ranking = [...new Set([...rank.map(row => typeof row === 'string' ? row : row.host), ...settings.candidatePool])].map(host => {
       const row = (k.probeSamples || []).find(sample => sample.host === host) || {};
       const feedback = playbackFeedback?.rows.find(item => item.host === host);
       return { host, ...row, mbps: Number.isFinite(row.mbps) ? row.mbps : null, samples: row.bytes > 0 ? 1 : 0,
-        successes: row.bytes > 0 ? 1 : 0, failures: row.error ? 1 : 0, eligible: true, cooldownSec: 0, evidence: 'network-probe',
+        successes: row.bytes > 0 ? 1 : 0, failures: row.error ? 1 : 0, eligible: effectiveRanking.includes(host), cooldownSec: 0, evidence: 'network-probe',
         recentVideoTimeouts: feedback?.timeouts.filter(at => Date.now() >= at && Date.now() - at < 120000).length || 0,
         lastStableAt: feedback?.stableAt || null };
     });

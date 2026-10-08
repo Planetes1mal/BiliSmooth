@@ -60,6 +60,7 @@ function harness({ store = new Map(), at = START, initial = {}, config = {}, fps
     progress(bytes) { this.status = 206; this.emit('progress', { loaded: bytes }); }
     complete(bytes) { this.readyState = 4; this.status = 206; this.emit('load'); this.emit('loadend', { loaded: bytes }); }
     timeout(bytes = 0) { this.readyState = 4; this.status = 0; this.emit('timeout'); this.emit('loadend', { loaded: bytes }); }
+    cancel() { this.readyState = 4; this.status = 0; this.emit('abort'); this.emit('loadend', { loaded: 0 }); }
   }
   const scope = emitter({ console, URL, Request, Response, Headers, AbortController, XMLHttpRequest: XHR,
     JSON: { parse: JSON.parse, stringify: JSON.stringify }, Date: FakeDate, performance: { now: () => clock },
@@ -151,6 +152,46 @@ test('startup timeout reroutes a synchronous player retry registered after open 
   assert.equal(delivered, 1, 'the native timeout event must reach the original player listener exactly once');
   assert.notEqual(new URL(retry.url).hostname, A, 'the target must change before native player timeout listeners issue the next request');
   assert.equal(retries, 1, 'timeout and loadend must not count the same failed request twice');
+});
+
+test('real video failures, silent cancellations and slow probes keep later video off the failing route', () => {
+  const HW = 'upos-sz-mirrorhw.bilivideo.com', host = xhr => new URL(xhr.url).hostname, audio = `https://${A}/upgcxcode/1/audio.m4s`;
+  const store = new Map([[RANK_KEY, JSON.stringify({ ranking: [HW, A, B], samples: [], at: START - 60000 })]]);
+  const h = harness({ store, initial: preparing, config: { mode: 'bad-only' } });
+  h.scope.__playinfo__ = { data: { dash: { video: [{ id: 120, baseUrl: media(A), backupUrl: [] }], audio: [{ id: 30280, baseUrl: audio, backupUrl: [] }] } } };
+  h.video.emit('loadedmetadata'); h.video.emit('seeking');
+  const first = h.request();
+  h.advance(10000, { move: false }); first.progress(1048576); first.timeout(1048576);
+  const retry = h.request(), sound = h.request(audio);
+  const avoided = h.api.getDiagnostics().events.find(event => event.type === 'route-avoided'), at = h.now(); h.close();
+  assert.equal(host(first), A, 'a native route without failure evidence keeps its original host');
+  assert.equal(host(retry), HW, 'the next video request leaves the native host that timed out');
+  assert.equal(host(sound), A, 'video failures do not move working audio');
+  assert.deepEqual([avoided?.fromHost, avoided?.toHost, avoided?.reason], [A, HW, 'request-failed']);
+  const refreshed = harness({ store, at: at + 600000, initial: preparing, config: { mode: 'bad-only' } });
+  const startup = refreshed.request(); refreshed.close();
+  assert.equal(host(startup), HW, 'a refresh within the failure memory starts on the working target');
+  store.set(RANK_KEY, JSON.stringify({ ranking: [A, HW, B], samples: [], at: START - 60000 }));
+  const reranked = harness({ store, at: at + 600000, config: { mode: 'force' } }), target = reranked.api.getState().targetHost; reranked.close();
+  assert.equal(target, HW, 'a probe winner with an unresolved real failure is not selected as the target');
+  const playing = harness({ config: { mode: 'bad-only' }, store: new Map([[RANK_KEY, JSON.stringify({ ranking: [A, HW], samples: [], at: START - 60000 })]]) });
+  playing.advance(3000, { frames: true });
+  const failed = playing.request(); playing.advance(1000, { frames: true }); failed.progress(65536); failed.timeout(65536);
+  const replacement = playing.request(), replaced = playing.api.getState().targetHost; playing.close();
+  assert.deepEqual([replaced, host(replacement)], [HW, HW], 'a playing target with a real failure is replaced before its buffer runs out');
+  const silent = harness({ config: { mode: 'bad-only' }, store: new Map([[RANK_KEY, JSON.stringify({ ranking: [A, HW], samples: [], at: START - 60000 })]]) });
+  silent.advance(3000, { frames: true });
+  const seek = silent.request(); silent.advance(500, { frames: true }); seek.cancel();
+  const kept = silent.api.getState().targetHost;
+  const hung = silent.request(); silent.advance(2050, { frames: true }); hung.cancel();
+  const after = silent.request(), switched = silent.api.getState().targetHost; silent.close();
+  assert.equal(kept, A, 'a quick cancellation is not delivery evidence');
+  assert.deepEqual([switched, host(after)], [HW, HW], 'a request the player abandons without a byte counts as a failed route');
+  const slow = harness({ initial: preparing, config: { mode: 'bad-only' }, store: new Map([[RANK_KEY, JSON.stringify({ ranking: [HW, A], at: START - 60000,
+    samples: [{ host: HW, ok: true, bytes: 786432, ttfb: 300, mbps: 20, elapsedMs: 320, status: 200 },
+      { host: A, ok: true, timedOut: true, bytes: 195338, ttfb: 1999, mbps: 0.4, elapsedMs: 4001, status: 200 }] })]]) });
+  const probed = slow.request(); slow.close();
+  assert.equal(host(probed), HW, 'a probe that could not finish its sample marks the host too slow for video');
 });
 
 for (const [name, options, act] of [

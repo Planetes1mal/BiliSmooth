@@ -6,7 +6,7 @@
   const instances = new WeakMap();
   const RANK_PREFIX = 'bilismooth.routing.rank.v4.', FEEDBACK_PREFIX = 'biliSmooth.playback-feedback.v1.';
   const RANK_TTL_MS = 21600000, STALL_GRACE_MS = 2500, STALL_RETRY_MS = 5000;
-  const PROBE_TIMEOUT_MS = 4000, PROBE_MAX_HOSTS = 12, PROBE_BYTES = 786432, EVIDENCE_MAX_AGE_MS = 1500;
+  const PROBE_TIMEOUT_MS = 4000, PROBE_MAX_HOSTS = 12, PROBE_BYTES = 786432, EVIDENCE_MAX_AGE_MS = 1500, NO_RESPONSE_MS = 2000;
   const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js') } : {};
   function create(options = {}) {
     const root = options.scope || global;
@@ -27,7 +27,7 @@
     let watchedVideo = null, watchTimer = null, stallTimer = null, stallDeadlineAt = null, rotateCursor = 0;
     let requestSerial = 0, networkEpoch = 0, feedbackGeneration, recentVideoFailure = null, lastVideoHost = null, lastRecoveryAt = -Infinity;
     let feedback = null, probeEpoch = 0, probeRound = null, probed = false, lastSample = null;
-    const initialGuard = config.p2pGuard, recovery = {avoidHost:null,clearTimer:null,tried:new Set()}, probeTimings = [];
+    const initialGuard = config.p2pGuard, recovery = {avoidHost:null,clearTimer:null,tried:new Set()}, probeTimings = [], avoided = new Set();
     const state = {installedAt:new Date(wallNow()).toISOString(),status:'idle',rewriteCount:0,lastSource:'',lastMediaHost:null,
       stalls:0,recoveries:0,p2pBlocked:0,ranking:[],probeSamples:[],probedAt:null,probing:false,probeBytes:0,events:[],needReload:false};
     const active = () => !destroyed && config.enabled && config.mode !== 'off';
@@ -52,7 +52,12 @@
       try {const data=options.getPlaybackEvidence?.();return data&&data.player===watchedVideo&&Number.isFinite(data.sampledAt)&&now()>=data.sampledAt&&now()-data.sampledAt<=EVIDENCE_MAX_AGE_MS?data:null;}catch{return null;}
     }
     function requestGeneration() {try{return options.getPlaybackEvidence?.()?.mediaGeneration;}catch{return undefined;}}
-    function feedbackRanking(ranking) {return adaptive()&&feedback?feedback.rank(ranking):ranking.slice();}
+    function feedbackRanking(ranking) {
+      if(!adaptive()||!feedback)return ranking.slice();
+      // Hosts with an unresolved real video failure stay candidates, after all others.
+      const ranked=feedback.rank(ranking), failing=ranked.filter(host=>feedback.failing(host));
+      return [...ranked.filter(host=>!failing.includes(host)),...failing];
+    }
     function recoveryCandidates() {
       const base=state.ranking.length?state.ranking:config.candidatePool;
       if(!adaptive())return base.slice();
@@ -93,18 +98,38 @@
       if(active()&&prepared.sampleUrl){lastSample=prepared.sampleUrl;scheduleProbe(lastSample);}
       return prepared;
     }
+    // Probe network failures disqualify a host for every request. A timed-out
+    // probe or a real video failure only says it is too slow for video bodies.
+    function weakRoute(host, video) {
+      const sample=state.probeSamples.find(row=>row.host===host), stable=!!feedback?.stable(host);
+      if(sample&&!sample.ok&&!stable)return 'probe-failed';
+      if(!video)return '';
+      if(feedback?.failing(host))return 'request-failed';
+      return sample?.timedOut&&!stable?'probe-slow':'';
+    }
+    function avoidReason(raw, host) {
+      if(!adaptive()||config.selection!=='auto'||host===config.pcdnHost||!config.candidatePool.includes(host))return '';
+      let kind='unknown';try{kind=options.classifyRequest?.(raw,raw)||kind;}catch{}
+      const video=kind==='video'||kind==='muxed', reason=weakRoute(host,video);
+      if(!reason||!recoveryCandidates().includes(config.pcdnHost))return '';
+      // A slow native route moves only to a target without the same evidence.
+      return reason==='probe-failed'||!weakRoute(config.pcdnHost,video)?reason:'';
+    }
     function planRoute(raw) {
       if(recovery.avoidHost)watchVideo();
-      const host=hostOf(raw);
-      const failed=adaptive()&&config.selection==='auto'&&state.probeSamples.some(sample=>sample.host===host&&!sample.ok);
-      const candidates=failed?recoveryCandidates():[];
-      const avoidFailed=failed&&!candidates.includes(host)&&candidates.includes(config.pcdnHost);
-      return (recovery.avoidHost&&host===recovery.avoidHost||avoidFailed?core.createPolicy({...config,mode:'force'}):policy).route(raw);
+      const host=hostOf(raw), reason=recovery.avoidHost&&host===recovery.avoidHost?'recovery':avoidReason(raw,host);
+      const result=(reason?core.createPolicy({...config,mode:'force'}):policy).route(raw);
+      return reason&&reason!=='recovery'&&result.changed?{...result,reason}:result;
     }
     function route(raw) {
       if(!active())return raw;
       const result=planRoute(raw);
-      if(result.changed)record([result],'segment');return result.url;
+      if(!result.changed)return result.url;
+      const key=[hostOf(result.original),result.targetHost,result.reason].join('|');
+      if(['probe-failed','probe-slow','request-failed'].includes(result.reason)&&!avoided.has(key)){
+        avoided.add(key);log('route-avoided',{fromHost:hostOf(result.original),toHost:result.targetHost,reason:result.reason});
+      }
+      record([result],'segment');return result.url;
     }
     function stopProbes() {probeEpoch++;probeRound?.abort();probeRound=null;state.probing=false;}
     function scheduleProbe(sampleUrl) {
@@ -216,7 +241,9 @@
       const evidence = playbackEvidence();
       if (!evidence || request.mediaGeneration !== evidence.mediaGeneration ||
           request.player !== watchedVideo && !(request.player === null && evidence.startupPending)) return;
-      const failed = ['timeout', 'network-error', 'http-error'].includes(event.outcome);
+      // The player abandons a video request that delivers no byte for about two seconds.
+      const silent = event.outcome === 'aborted' && !(event.bytes > 0) && event.elapsedMs >= NO_RESPONSE_MS;
+      const failed = silent || ['timeout', 'network-error', 'http-error'].includes(event.outcome);
       if (!failed && event.outcome !== 'complete') return;
       request.feedbackFinished = true;
       if (failed) recentVideoFailure = { at: now(), generation: evidence.mediaGeneration, host: request.host };
@@ -226,7 +253,7 @@
         const stablePlayback = !watchedVideo.paused && !watchedVideo.seeking && !document?.hidden &&
           evidence.frameHealth?.state === 'healthy' && wallBuffer(evidence) >= 3;
         if (failed || stablePlayback) feedback.record({ host: failed ? request.host : hostOf(event.responseUrl), kind: request.kind,
-          transport: request.transport, outcome: event.outcome, status: event.status, bytes: event.bytes, elapsedMs: event.elapsedMs });
+          transport: request.transport, outcome: silent ? 'no-response' : event.outcome, status: event.status, bytes: event.bytes, elapsedMs: event.elapsedMs });
         else feedback.resetWindow();
         saveFeedback();
       }
@@ -237,13 +264,17 @@
       const startup = evidence.startupPending && watchedVideo.readyState < 3 && wallBuffer(evidence) <= 0.5;
       const starving = !watchedVideo.paused && !watchedVideo.seeking &&
         (watchedVideo.readyState < 3 || frameNeedsRecovery(evidence) || wallBuffer(evidence) <= 1);
-      if (!startup && !starving) return;
-      const reason = startup ? 'startup-request-failed' : 'video-request-failed';
+      // A playing target with a real failure is replaced while a candidate has
+      // none; otherwise each later segment can wait for the same timeout.
+      const replace = !startup && !starving && !watchedVideo.paused && !!feedback?.failing(request.host) &&
+        recoveryCandidates().some(host => host !== request.host && !feedback.failing(host));
+      if (!startup && !starving && !replace) return;
+      const reason = startup ? 'startup-request-failed' : starving ? 'video-request-failed' : 'target-request-failed';
       if (rotateTarget(request.host, reason)) {
         state.recoveries++; cancelStall(reason);
         // Initial preparation is driven by actual failed native requests. It
         // never calls play(), seeks, or repeatedly rotates a paused player.
-        if (!startup) scheduleStall(STALL_RETRY_MS, 'continued-waiting');
+        if (starving && !startup) scheduleStall(STALL_RETRY_MS, 'continued-waiting');
       }
     }
 
@@ -298,7 +329,7 @@
       for(const [name,fn]of playerHandlers)watchedVideo?.addEventListener(name,fn,{passive:true});
     }
     function resetNetwork(){
-      networkEpoch++;stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;
+      networkEpoch++;stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;avoided.clear();
       feedback?.clear();saveFeedback();recentVideoFailure=null;lastVideoHost=null;lastRecoveryAt=-Infinity;rotateCursor=0;
       recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);cancelStall('network-reset');
       try{root.localStorage?.removeItem(rankingKey());}catch{}log('network-reset');
