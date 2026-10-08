@@ -8,7 +8,7 @@
   const RANK_TTL_MS = 21600000, STALL_GRACE_MS = 2500, STALL_RETRY_MS = 5000;
   const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js'), delivery: require('../core/delivery-session.js'), throughput: require('../core/throughput.js'), deliveryPolicy: require('../core/delivery-policy.js') } : {};
   const DeliveryPolicy = global.BiliSmoothDeliveryPolicy || imported.deliveryPolicy, C = DeliveryPolicy.constants;
-  const PROBE_TIMEOUT_MS = C.RACE_TIMEOUT_MS, PROBE_MAX_HOSTS = 12, PROBE_BYTES = C.RACE_SAMPLE_BYTES, EVIDENCE_MAX_AGE_MS = 1500, NO_RESPONSE_MS = 2000;
+  const PROBE_TIMEOUT_MS = C.RACE_TIMEOUT_MS, PROBE_MAX_HOSTS = 12, PROBE_BYTES = C.RACE_SAMPLE_BYTES, EVIDENCE_MAX_AGE_MS = 1500, NO_RESPONSE_MS = C.NO_RESPONSE_MS;
   function create(options = {}) {
     const root = options.scope || global;
     if (instances.has(root)) return instances.get(root);
@@ -29,6 +29,7 @@
     let policy = core.createPolicy(config);
     const delivery = DeliverySession.create({ pool: config.candidatePool }), preparedPayloads = new WeakSet(), measurements = new Map();
     const videoRequests = new Map(), recentFragments = new Map(), syntheticHistory = new Map();
+    const retention = new Map();
     let measuredRace = null;
     let watchedVideo = null, watchTimer = null, stallTimer = null, stallDeadlineAt = null, rotateCursor = 0;
     let requestSerial = 0, networkEpoch = 0, feedbackGeneration, recentVideoFailure = null, lastVideoHost = null, lastRecoveryAt = -Infinity;
@@ -124,21 +125,49 @@
       // A slow native route moves only to a target without the same evidence.
       return reason==='probe-failed'||!weakRoute(config.pcdnHost,video)?reason:'';
     }
-    function planRoute(raw) {
+    function retained(cid) {
+      if (!retention.has(cid)) retention.set(cid, { switchCount: 0, nextTestAt: 0, nextAutomaticAt: 0, automaticDelayMs: 0,
+        fragments: new Map(), failures: [], races: [], switches: [], runnerUp: null });
+      return retention.get(cid);
+    }
+    function fragmentKey(raw, range) {
+      const rep = delivery.get(raw);
+      return rep && ['video', 'audio'].includes(rep.kind) && /^bytes=\d+-\d+$/.test(range) ? `${rep.cid}|${rep.key}|${range}` : null;
+    }
+    function fragmentState(row, key) {
+      if (!row.fragments.has(key)) row.fragments.set(key, { host: null, failedHosts: new Set() });
+      return row.fragments.get(key);
+    }
+    function noteHostFailure(request, host) {
+      if (request.deliveryFailureRecorded) return;
+      request.deliveryFailureRecorded = true;
+      const row = retained(request.cid), at = wallNow();
+      row.failures = row.failures.filter(failure => at - failure.at <= C.ERROR_WINDOW_MS);
+      row.failures.push({ host, at });
+    }
+    function planRoute(raw, { range = '' } = {}) {
       const session = delivery.current(), representation = delivery.get(raw), facts = policy.describe(raw);
-      if (config.selection === 'auto' && session?.activeHost && session.activeEpoch === networkEpoch && representation?.cid === session.cid
+      if (config.selection === 'auto' && session && representation?.cid === session.cid
         && facts.media && (facts.distribution || facts.international) && !facts.shared && !facts.live && !facts.scheduler && !facts.relaySource) {
-        const url = delivery.addressForHost(raw, session.activeHost);
-        if (url) return { original: raw, url, changed: url !== raw, reason: 'measured-route', targetHost: session.activeHost };
+        const row = retained(session.cid), fragment = row.fragments.get(fragmentKey(raw, range));
+        let host = fragment?.host || (session.activeEpoch === networkEpoch ? session.activeHost : null);
+        if (fragment?.failedHosts.size) {
+          host = fragment.host && !fragment.failedHosts.has(fragment.host) ? fragment.host
+            : row.runnerUp && !fragment.failedHosts.has(row.runnerUp) ? row.runnerUp : null;
+          const url = host && delivery.addressForHost(raw, host);
+          return { original: raw, url: url || raw, changed: !!url && url !== raw, reason: 'fragment-retry', targetHost: host };
+        }
+        const url = host && delivery.addressForHost(raw, host);
+        if (url) return { original: raw, url, changed: url !== raw, reason: 'measured-route', targetHost: host };
       }
       if(recovery.avoidHost)watchVideo();
       const host=hostOf(raw), reason=recovery.avoidHost&&host===recovery.avoidHost?'recovery':avoidReason(raw,host);
       const result=(reason?core.createPolicy({...config,mode:'force'}):policy).route(raw);
       return reason&&reason!=='recovery'&&result.changed?{...result,reason}:result;
     }
-    function route(raw) {
+    function route(raw, context) {
       if(!active())return raw;
-      const result=planRoute(raw);
+      const result=planRoute(raw,context);
       if(!result.changed)return result.url;
       const key=[hostOf(result.original),result.targetHost,result.reason].join('|');
       if(['probe-failed','probe-slow','request-failed'].includes(result.reason)&&!avoided.has(key)){
@@ -207,6 +236,8 @@
         cid: representation?.cid ?? null, representationKind: representation?.kind ?? null,
         mediaGeneration: generation, player: watchedVideo };
       if (request.representationKind === 'video' && transport === 'xhr') {
+        const session = delivery.current();
+        if (!session.nativeHost) session.nativeHost = hostOf(originalUrl);
         request.bytes = 0; request.firstByteAt = null; request.hiddenOverlap = !!document?.hidden; videoRequests.set(request.id, request);
       }
       state.lastMediaHost = request.host || state.lastMediaHost;
@@ -230,6 +261,16 @@
         }
       }
       if (type === 'transfer' && request.cid && request.networkEpoch === networkEpoch) {
+        const key = fragmentKey(request.originalUrl, request.range);
+        if (key && !event.hiddenOverlap) {
+          const failed = ['timeout', 'network-error', 'http-error'].includes(event.outcome)
+            || event.outcome === 'aborted' && !(event.bytes > 0) && event.elapsedMs >= C.NO_RESPONSE_MS
+              && !watchedVideo?.seeking && !watchedVideo?.paused;
+          if (failed) {
+            fragmentState(retained(request.cid), key).failedHosts.add(event.host);
+            if (request.representationKind === 'video') noteHostFailure(request, event.host);
+          } else if (event.complete) retained(request.cid).fragments.delete(key);
+        }
         let meter = measurements.get(request.cid);
         if (!meter) { meter = Throughput.create(); measurements.set(request.cid, meter); }
         meter.record({ host: event.host, kind: request.representationKind, transport: request.transport,
@@ -240,10 +281,12 @@
       try { observePlaybackTransfer(request, event); } catch (_) { /* Feedback cannot affect native delivery. */ }
     }
     function stopMeasuredRace() { const round = measuredRace; measuredRace = null; round?.controller.abort(); }
-    function testRoutes() {
+    function testRoutes({ request: selectedRequest, trigger = 'manual' } = {}) {
       const session = delivery.current();
       if (!active() || config.selection !== 'auto' || document?.hidden || measuredRace || !session || typeof nativeFetch !== 'function') return false;
-      const request = [...videoRequests.values()].find(row => row.cid === session.cid && !row.hiddenOverlap) || recentFragments.get(session.cid);
+      const row = retained(session.cid), at = wallNow();
+      if (row.switchCount >= C.MAX_SWITCHES_PER_VIDEO || at < row.nextTestAt || trigger !== 'manual' && at < row.nextAutomaticAt) return false;
+      const request = selectedRequest || [...videoRequests.values()].find(item => item.cid === session.cid && !item.hiddenOverlap) || recentFragments.get(session.cid);
       if (!request || request.hiddenOverlap) return false;
       const match = /^bytes=(\d+)-(\d+)$/.exec(request.range);
       if (!match) return false;
@@ -255,11 +298,21 @@
         .map(host => ({ host, url: delivery.addressForHost(request.originalUrl, host) })).filter(target => target.url).slice(0, C.RACE_CHALLENGERS);
       if (!targets.length) return false;
       const sustained = measurements.get(session.cid)?.snapshot().find(row => row.host === currentHost)?.goodputBps || 0;
+      row.failures = row.failures.filter(failure => at - failure.at <= C.ERROR_WINDOW_MS);
+      const requiredBps = session.requiredBps * (watchedVideo?.playbackRate || 1);
+      const keepHost = trigger === 'stuck' && requiredBps > 0 && sustained >= requiredBps * C.SHORTFALL_RATE_FACTOR
+        && !row.failures.some(failure => failure.host === currentHost);
+      if (trigger === 'stuck') noteHostFailure(request, currentHost);
       const rate = request.bytes * 8000 / ((request.completedAt || now()) - request.startedAt) || (request.completedAt ? sustained : 0);
       const currentMs = rate > 0 ? (end - start + 1) * 8000 / rate : Infinity;
-      const record = { requestId: request.id, trigger: 'manual', range: `bytes=${start}-${end}`, contenders: targets.map(target => target.host),
-        winner: null, runnerUp: null, samples: [], switched: false };
+      const record = { at, requestId: request.id, trigger, range: `bytes=${start}-${end}`, contenders: targets.map(target => target.host),
+        currentMs: Number.isFinite(currentMs) ? currentMs : null, verdict: null, winner: null, runnerUp: null, samples: [], switched: false };
+      row.races.push(record);
       session.lastRace = record;
+      function decided() {
+        row.automaticDelayMs = row.automaticDelayMs ? row.automaticDelayMs * C.RACE_COOLDOWN_MULTIPLIER : C.RACE_COOLDOWN_MS;
+        row.nextTestAt = wallNow() + C.RACE_COOLDOWN_MS; row.nextAutomaticAt = wallNow() + row.automaticDelayMs;
+      }
       const round = { cid: session.cid, controller: new root.AbortController() }; measuredRace = round;
       log('race', { reason: 'started', id: request.id, host: currentHost });
       Probes.race({ scope: root, now, fetch: nativeFetch, signal: round.controller.signal, range: { start, end }, targets,
@@ -267,14 +320,26 @@
           if (measuredRace !== round) return;
           record.winner = sample.host; record.samples = [sample];
           if (DeliveryPolicy.beatsCurrent(sample.elapsedMs, currentMs)) {
-            session.activeHost = sample.host; session.activeEpoch = networkEpoch; record.switched = true;
-            log('switch', { id: request.id, fromHost: currentHost, toHost: sample.host, reason: 'manual' });
+            const previousHost = session.activeEpoch === networkEpoch && session.activeHost || currentHost;
+            const scope = keepHost || previousHost === sample.host ? 'fragment' : 'video';
+            fragmentState(row, fragmentKey(request.originalUrl, request.range)).host = sample.host;
+            if (scope === 'fragment') {
+              if (!session.activeHost || session.activeEpoch !== networkEpoch) session.activeHost = currentHost;
+              record.verdict = 'fragment';
+            } else {
+              session.activeHost = sample.host; row.switchCount++; record.switched = true; record.verdict = 'switched';
+            }
+            session.activeEpoch = networkEpoch;
+            const change = { at: wallNow(), fromHost: currentHost, toHost: sample.host, scope, range: request.range };
+            row.switches.push(change); log('switch', { ...change, id: request.id, reason: trigger });
+            decided();
             interceptor.syntheticTimeout(request.id);
-          }
+          } else { record.verdict = sample.elapsedMs >= currentMs ? 'current-fastest' : 'below-margin'; decided(); }
         }
       }).then(result => {
         if (measuredRace !== round) return;
-        measuredRace = null; record.samples = result.samples; record.runnerUp = result.runnerUp?.host || null;
+        measuredRace = null; record.samples = result.samples; record.runnerUp = result.runnerUp?.host || null; row.runnerUp = record.runnerUp;
+        if (!record.winner) { record.verdict = 'no-completion'; decided(); }
         log('race', { reason: 'finished', id: request.id, host: record.winner || currentHost, bytes: result.totalBytes });
       });
       return true;
@@ -393,6 +458,7 @@
     function unwatchVideo(){for(const [name,fn]of playerHandlers)watchedVideo?.removeEventListener?.(name,fn);}
     function clearRecovery(){
       videoRequests.clear(); recentFragments.clear(); stopMeasuredRace();
+      for (const row of retention.values()) row.fragments.clear();
       recentVideoFailure=null;lastVideoHost=null;state.lastMediaHost=null;lastRecoveryAt=-Infinity;
       recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);recovery.clearTimer=null;
     }
@@ -406,6 +472,7 @@
     }
     function resetNetwork(){
       networkEpoch++;videoRequests.clear();recentFragments.clear();stopMeasuredRace();measurements.clear();stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;avoided.clear();
+      for (const row of retention.values()) { row.fragments.clear(); row.failures = []; row.runnerUp = null; }
       feedback?.clear();saveFeedback();recentVideoFailure=null;lastVideoHost=null;lastRecoveryAt=-Infinity;rotateCursor=0;
       recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);cancelStall('network-reset');
       try{root.localStorage?.removeItem(rankingKey());}catch{}log('network-reset');
@@ -424,7 +491,10 @@
     function getFlags(){return {needReload:state.needReload,probing:state.probing};}
     function sessionSnapshot() {
       const session = delivery.snapshot();
+      const row = session && retained(session.cid);
       return session ? { ...session, hosts: measurements.get(session.cid)?.snapshot() || [],
+        nativeHost: delivery.current().nativeHost || null, switchCount: row.switchCount, nextTestAt: row.nextTestAt, nextAutomaticAt: row.nextAutomaticAt,
+        races: plainCopy(row.races), switches: plainCopy(row.switches),
         activeHost: delivery.current().activeEpoch === networkEpoch ? delivery.current().activeHost : null,
         syntheticTimeouts: { ...interceptor.syntheticStatus(), events: plainCopy(syntheticHistory.get(session.cid) || []) },
         racing: measuredRace?.cid === session.cid, lastRace: delivery.current().lastRace ? plainCopy(delivery.current().lastRace) : null } : null;
@@ -441,16 +511,13 @@
       document?.removeEventListener?.('visibilitychange',onVisibilityChange);interceptor?.destroy();if(initialGuard)state.needReload=true;
       destroyed=true;instances.delete(root);
     }
-    const api={getConfig,setConfig,getFlags,getState,resetNetwork,retry,testRoutes,rewriteUrl:raw=>active()?planRoute(raw).url:raw,destroy};
+    const api={getConfig,setConfig,getFlags,getState,resetNetwork,retry,testRoutes,rewriteUrl:(raw,context)=>active()?planRoute(raw,context).url:raw,destroy};
     instances.set(root,api);
     const Feedback=root.BiliSmoothPlaybackFeedback||global.BiliSmoothPlaybackFeedback;
     if(Feedback){let initial;try{initial=Reflect.apply(nativeParse,json,[root.localStorage?.getItem(feedbackKey())||'null']);}catch{}feedback=Feedback.create({hosts:config.candidatePool,now:wallNow,initial});}
     const cached=loadRanking();if(cached){state.probeSamples=cached.samples;state.probedAt=new Date(cached.at).toISOString();applyRanking(cached.ranking);}
     interceptor=RequestLayer.install({scope:root,active,route,prepare,sharingPolicy:initialGuard,
-      fragmentKey(raw, range) {
-        const rep = delivery.get(raw);
-        return rep?.kind === 'video' && /^bytes=\d+-\d+$/.test(range) ? `${rep.cid}|${rep.key}|${range}` : null;
-      },
+      fragmentKey: (raw, range) => delivery.get(raw)?.kind === 'video' ? fragmentKey(raw, range) : null,
       onSynthetic(event) {
         const { cid, at, ...record } = event;
         if (!syntheticHistory.has(cid)) syntheticHistory.set(cid, []);

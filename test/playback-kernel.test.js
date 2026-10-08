@@ -373,3 +373,67 @@ test('measured races preserve issued signatures, bound Range bytes and route on 
     assert.doesNotMatch(JSON.stringify(final), /UPOS|AKAMAI|private|https?:|sign=/); h.kernel.destroy();
   }
 });
+
+test('measured routing retains healthy fragments, bounds switching and preserves native retry paths', async () => {
+  const C = settings.candidatePool[2], D = settings.candidatePool[3], cid = '42231991605';
+  const url = (host = A, id = '30080', video = cid) => `https://${host}/upgcxcode/1/${video}-1-${id}.m4s?sign=PRIVATE`;
+  const range = index => `bytes=${index * 1048576}-${(index + 1) * 1048576 - 1}`;
+  const manifest = (video = cid) => ({ dash: { video: ['30080', '30112'].map(id => ({ id: Number(id), bandwidth: 9000000,
+    baseUrl: url(A, id, video), backupUrl: [B, C, D].map(host => url(host, id, video)) })),
+    audio: [{ id: 30280, bandwidth: 128000, baseUrl: url(A, '30280', video), backupUrl: [B, C, D].map(host => url(host, '30280', video)) }] } });
+  const rankKey = Kernel.constants.RANK_PREFIX + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US';
+  for (const scenario of ['cooldown', 'no-switch cooldown', 'four-switch limit', 'healthy fragment', 'video retry', 'audio retry', 'missing runner-up']) {
+    const pending = [], store = new Map([[rankKey, JSON.stringify({ ranking: [A, B], samples: [], at: 100000 })]]);
+    const h = harness({ store, fetch: (address, init) => new Promise(resolve => pending.push({ address, init, resolve })) });
+    h.scope.__playinfo__ = manifest();
+    const open = (address = url(), requestedRange = range(0)) => {
+      const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', address); xhr.setRequestHeader('Range', requestedRange); xhr.send(); return xhr;
+    };
+    const routed = (host, requestedRange, id = '30080', expected = host) => {
+      const xhr = open(url(host, id), requestedRange); assert.equal(new URL(xhr.url).hostname, expected, scenario); xhr.cancel();
+    };
+    const compare = async (trigger = 'manual', hasRunner = true) => {
+      const before = pending.length; assert.equal(h.kernel.testRoutes({ trigger }), true, scenario);
+      assert.equal(pending.length - before, 2, scenario);
+      const response = (item, status) => { const [start, end] = item.init.headers.Range.slice(6).split('-').map(Number);
+        return { status, body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(end - start + 1) }) }) } }; };
+      await h.advance(200); pending[before].resolve(response(pending[before], 206)); await h.flush();
+      await h.advance(100); pending[before + 1].resolve(response(pending[before + 1], hasRunner ? 206 : 503)); await h.flush();
+      return new URL(pending[before].address).hostname;
+    };
+    const blocked = trigger => { const before = pending.length; assert.equal(h.kernel.testRoutes({ trigger }), false, scenario); assert.equal(pending.length, before, scenario); };
+    if (scenario === 'cooldown' || scenario === 'no-switch cooldown') {
+      const xhr = open(url(), 'bytes=0-2097151');
+      await h.advance(scenario === 'cooldown' ? 1000 : 100); if (scenario === 'no-switch cooldown') xhr.progress(1048576);
+      const winner = await compare(); routed(A, range(10), '30080', scenario === 'cooldown' ? winner : A);
+      await h.advance(9899); blocked('manual'); await h.advance(1);
+      xhr.cancel(); const next = open(url(), 'bytes=3145728-5242879');
+      if (scenario === 'no-switch cooldown') { await h.advance(100); next.progress(1048576); }
+      await compare('errors'); await h.advance(19899); blocked('errors'); await h.advance(1); await compare('errors');
+      await h.advance(9900); blocked('errors'); await compare('manual');
+    } else if (scenario === 'four-switch limit') {
+      for (let index = 0; index < 4; index++) {
+        const xhr = open(url(), range(index)); await h.advance(index ? 10000 : 1000);
+        const winner = await compare(); routed(A, range(index + 10), '30080', winner); xhr.cancel();
+      }
+      await h.advance(80000); blocked('manual'); blocked('errors');
+      h.scope.__playinfo__ = manifest('42242147914'); open(url(A, '30080', '42242147914')); await h.advance(1000); await compare();
+      h.scope.__playinfo__ = manifest(); blocked('manual');
+    } else if (scenario === 'healthy fragment') {
+      const healthy = open(); await h.advance(20); healthy.progress(131072); healthy.complete(131072);
+      const hanging = open(url(), range(1)); await h.advance(1000); const winner = await compare('stuck');
+      routed(A, range(1), '30080', winner); routed(winner, range(2), '30080', A); routed(winner, range(1), '30112', A); hanging.cancel();
+      await h.advance(10000); open(url(winner), range(3)); await h.advance(1000); const nextWinner = await compare('stuck');
+      routed(A, range(4), '30080', nextWinner);
+    } else {
+      const xhr = open(); await h.advance(1000); const winner = await compare('manual', scenario !== 'missing runner-up'); xhr.cancel();
+      const id = scenario === 'audio retry' ? '30280' : '30080', failed = open(url(A, id), range(5));
+      assert.equal(new URL(failed.url).hostname, winner, scenario); failed.expire();
+      const retry = open(url(D, id), range(5)); assert.equal(new URL(retry.url).hostname, scenario === 'missing runner-up' ? D : C, scenario);
+      if (scenario !== 'missing runner-up') {
+        retry.expire(); h.kernel.setConfig({ mode: 'force' }); routed(D, range(5), id, D);
+      }
+    }
+    h.kernel.destroy();
+  }
+});
