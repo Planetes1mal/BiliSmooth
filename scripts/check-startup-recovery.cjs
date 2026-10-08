@@ -104,6 +104,12 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset, 
     page = await context.newPage(); page.on('pageerror', error => run.pageErrors.push(error.message));
     page.on('requestfailed', request => run.networkErrors.push({ host: new URL(request.url()).hostname, error: request.failure()?.errorText }));
     await page.goto(pageUrl);
+    if (synthetic) {
+      await page.evaluate(B => localStorage.setItem('bilismooth.delivery-history.v1.America/New_York|en-US', JSON.stringify({ version: 1,
+        rows: BiliSmoothSettings.candidatePool.map(host => ({ host, meanBps: host === B ? 1000000 : null, weight: host === B ? 1 : 0,
+          measuredAt: host === B ? Date.now() : 0, failedAt: host === B ? 0 : Date.now() })) })), B);
+      await page.reload();
+    }
     await page.waitForFunction(() => window.BiliSmoothSession?.getState().startupReady === true, undefined, { timeout: 10000 });
     await page.evaluate(({ A, B, adaptive }) => {
       localStorage.setItem(BiliSmoothPlaybackKernel.constants.RANK_PREFIX + 'America/New_York|en-US', JSON.stringify({ ranking: [A, B], samples: [], at: Date.now() }));

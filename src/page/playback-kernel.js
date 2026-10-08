@@ -4,9 +4,9 @@
 (function (global) {
   'use strict';
   const instances = new WeakMap();
-  const RANK_PREFIX = 'bilismooth.routing.rank.v4.', FEEDBACK_PREFIX = 'biliSmooth.playback-feedback.v1.';
+  const RANK_PREFIX = 'bilismooth.routing.rank.v4.', FEEDBACK_PREFIX = 'biliSmooth.playback-feedback.v1.', HISTORY_PREFIX = 'bilismooth.delivery-history.v1.';
   const RANK_TTL_MS = 21600000, STALL_GRACE_MS = 2500, STALL_RETRY_MS = 5000;
-  const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js'), delivery: require('../core/delivery-session.js'), throughput: require('../core/throughput.js'), deliveryPolicy: require('../core/delivery-policy.js') } : {};
+  const imported = typeof require === 'function' ? { settings: require('../core/settings.js'), rules: require('../core/routing-policy.js'), requests: require('./request-interceptor.js'), probes: require('./network-probe.js'), delivery: require('../core/delivery-session.js'), throughput: require('../core/throughput.js'), deliveryPolicy: require('../core/delivery-policy.js'), feedback: require('../core/playback-feedback.js') } : {};
   const DeliveryPolicy = global.BiliSmoothDeliveryPolicy || imported.deliveryPolicy, C = DeliveryPolicy.constants;
   const PROBE_TIMEOUT_MS = C.RACE_TIMEOUT_MS, PROBE_MAX_HOSTS = 12, PROBE_BYTES = C.RACE_SAMPLE_BYTES, EVIDENCE_MAX_AGE_MS = 1500, NO_RESPONSE_MS = C.NO_RESPONSE_MS;
   function create(options = {}) {
@@ -18,7 +18,8 @@
     const Probes = root.BiliSmoothNetworkProbe || global.BiliSmoothNetworkProbe || imported.probes;
     const DeliverySession = root.BiliSmoothDeliverySession || global.BiliSmoothDeliverySession || imported.delivery;
     const Throughput = root.BiliSmoothThroughput || global.BiliSmoothThroughput || imported.throughput;
-    if (!core || !RequestLayer || !Probes || !DeliverySession || !Throughput) throw Error('BiliSmooth playback dependencies are unavailable');
+    const Feedback = root.BiliSmoothPlaybackFeedback || global.BiliSmoothPlaybackFeedback || imported.feedback;
+    if (!core || !RequestLayer || !Probes || !DeliverySession || !Throughput || !Feedback) throw Error('BiliSmooth playback dependencies are unavailable');
     const document = root.document, json = root.JSON || JSON;
     const nativeParse = json.parse, nativeStringify = json.stringify, nativeFetch = root.fetch;
     const plainCopy = value => Reflect.apply(nativeParse,json,[Reflect.apply(nativeStringify,json,[value])]);
@@ -33,7 +34,7 @@
     let measuredRace = null;
     let watchedVideo = null, watchTimer = null, stallTimer = null, stallDeadlineAt = null, rotateCursor = 0;
     let requestSerial = 0, networkEpoch = 0, feedbackGeneration, recentVideoFailure = null, lastVideoHost = null, lastRecoveryAt = -Infinity;
-    let feedback = null, probeEpoch = 0, probeRound = null, probed = false, lastSample = null;
+    let history, feedback = null, probeEpoch = 0, probeRound = null, probed = false, lastSample = null;
     const initialGuard = config.p2pGuard, recovery = {avoidHost:null,clearTimer:null,tried:new Set()}, probeTimings = [], avoided = new Set();
     const state = {installedAt:new Date(wallNow()).toISOString(),status:'idle',rewriteCount:0,lastSource:'',lastMediaHost:null,
       stalls:0,recoveries:0,p2pBlocked:0,ranking:[],probeSamples:[],probedAt:null,probing:false,probeBytes:0,events:[],needReload:false};
@@ -54,7 +55,7 @@
       } catch {return false;}
     }
     function regionKey() {try{return (root.Intl||Intl).DateTimeFormat().resolvedOptions().timeZone+'|'+(root.navigator?.language||'');}catch{return 'unknown';}}
-    const rankingKey = () => RANK_PREFIX+regionKey(), feedbackKey = () => FEEDBACK_PREFIX+regionKey();
+    const rankingKey = () => RANK_PREFIX+regionKey(), feedbackKey = () => FEEDBACK_PREFIX+regionKey(), historyKey = () => HISTORY_PREFIX+regionKey();
     function playbackEvidence() {
       try {const data=options.getPlaybackEvidence?.();return data&&data.player===watchedVideo&&Number.isFinite(data.sampledAt)&&now()>=data.sampledAt&&now()-data.sampledAt<=EVIDENCE_MAX_AGE_MS?data:null;}catch{return null;}
     }
@@ -73,6 +74,23 @@
       return feedbackRanking([...new Set([...base,...config.candidatePool])]).filter(host=>!failed.has(host)||stable.has(host));
     }
     function saveFeedback() {try{root.localStorage?.setItem(feedbackKey(),Reflect.apply(nativeStringify,json,[feedback.snapshot()]));}catch{}}
+    function saveHistory() {try{root.localStorage?.setItem(historyKey(),Reflect.apply(nativeStringify,json,[history.snapshot()]));}catch{}}
+    function migrateLegacyHistory() {
+      try {
+        const storage = root.localStorage;
+        const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(key => key.startsWith(FEEDBACK_PREFIX));
+        for (const key of keys) {
+          const nextKey = HISTORY_PREFIX + key.slice(FEEDBACK_PREFIX.length);
+          const oldText = storage.getItem(key), nextText = storage.getItem(nextKey);
+          let legacy, initial;
+          try { legacy = Reflect.apply(nativeParse, json, [oldText]); } catch {}
+          try { initial = Reflect.apply(nativeParse, json, [nextText]); } catch {}
+          const migrated = Feedback.createHistory({ now: wallNow, initial });
+          if (migrated.importFailures(legacy)) storage.setItem(nextKey, Reflect.apply(nativeStringify, json, [migrated.snapshot()]));
+          storage.removeItem(key);
+        }
+      } catch { /* A failed write retains its old key; the next page start retries migration. */ }
+    }
     function cacheSample(sample) {
       const number=(key,fallback=0)=>Number.isFinite(sample[key])&&sample[key]>=0?sample[key]:fallback;
       return {host:sample.host,ttfb:number('ttfb',null),mbps:number('mbps'),bytes:number('bytes'),elapsedMs:number('elapsedMs'),
@@ -144,6 +162,7 @@
       const row = retained(request.cid), at = wallNow();
       row.failures = row.failures.filter(failure => at - failure.at <= C.ERROR_WINDOW_MS);
       row.failures.push({ host, at });
+      if (history.recordFailure(host, at)) saveHistory();
     }
     function planRoute(raw, { range = '' } = {}) {
       const session = delivery.current(), representation = delivery.get(raw), facts = policy.describe(raw);
@@ -294,8 +313,9 @@
       const end = request.completedAt ? start + C.RACE_SAMPLE_BYTES - 1 : Math.min(Number(match[2]), start + C.RACE_SAMPLE_BYTES - 1);
       if (start > end) return false;
       const rep = delivery.get(request.originalUrl), currentHost = request.host;
-      const targets = [...new Set([...rep.urls.keys(), ...config.candidatePool])].filter(host => host !== currentHost)
-        .map(host => ({ host, url: delivery.addressForHost(request.originalUrl, host) })).filter(target => target.url).slice(0, C.RACE_CHALLENGERS);
+      const candidates = [...new Set([...rep.urls.keys(), ...config.candidatePool])].filter(host => host !== currentHost)
+        .map(host => ({ host, url: delivery.addressForHost(request.originalUrl, host) })).filter(target => target.url);
+      const targets = history.challengers(candidates.map(target => target.host)).map(host => candidates.find(target => target.host === host));
       if (!targets.length) return false;
       const sustained = measurements.get(session.cid)?.snapshot().find(row => row.host === currentHost)?.goodputBps || 0;
       row.failures = row.failures.filter(failure => at - failure.at <= C.ERROR_WINDOW_MS);
@@ -338,7 +358,7 @@
         }
       }).then(result => {
         if (measuredRace !== round) return;
-        measuredRace = null; record.samples = result.samples; record.runnerUp = result.runnerUp?.host || null; row.runnerUp = record.runnerUp;
+        measuredRace = null; history.recordRace(result.samples); saveHistory(); record.samples = result.samples; record.runnerUp = result.runnerUp?.host || null; row.runnerUp = record.runnerUp;
         if (!record.winner) { record.verdict = 'no-completion'; decided(); }
         log('race', { reason: 'finished', id: request.id, host: record.winner || currentHost, bytes: result.totalBytes });
       });
@@ -473,7 +493,7 @@
     function resetNetwork(){
       networkEpoch++;videoRequests.clear();recentFragments.clear();stopMeasuredRace();measurements.clear();stopProbes();probed=false;state.ranking=[];state.probeSamples=[];state.probedAt=null;avoided.clear();
       for (const row of retention.values()) { row.fragments.clear(); row.failures = []; row.runnerUp = null; }
-      feedback?.clear();saveFeedback();recentVideoFailure=null;lastVideoHost=null;lastRecoveryAt=-Infinity;rotateCursor=0;
+      history.clear();saveHistory();feedback?.clear();saveFeedback();recentVideoFailure=null;lastVideoHost=null;lastRecoveryAt=-Infinity;rotateCursor=0;
       recovery.avoidHost=null;recovery.tried.clear();clearLater(recovery.clearTimer);cancelStall('network-reset');
       try{root.localStorage?.removeItem(rankingKey());}catch{}log('network-reset');
       if(lastSample)scheduleProbe(lastSample);if(watchedVideo&&watchedVideo.readyState<3)onWaiting({type:'network-reset'});return getState();
@@ -513,7 +533,8 @@
     }
     const api={getConfig,setConfig,getFlags,getState,resetNetwork,retry,testRoutes,rewriteUrl:(raw,context)=>active()?planRoute(raw,context).url:raw,destroy};
     instances.set(root,api);
-    const Feedback=root.BiliSmoothPlaybackFeedback||global.BiliSmoothPlaybackFeedback;
+    let savedHistory;try{savedHistory=Reflect.apply(nativeParse,json,[root.localStorage?.getItem(historyKey())||'null']);}catch{}
+    history=Feedback.createHistory({now:wallNow,random:root.Math?.random,initial:savedHistory});
     if(Feedback){let initial;try{initial=Reflect.apply(nativeParse,json,[root.localStorage?.getItem(feedbackKey())||'null']);}catch{}feedback=Feedback.create({hosts:config.candidatePool,now:wallNow,initial});}
     const cached=loadRanking();if(cached){state.probeSamples=cached.samples;state.probedAt=new Date(cached.at).toISOString();applyRanking(cached.ranking);}
     interceptor=RequestLayer.install({scope:root,active,route,prepare,sharingPolicy:initialGuard,

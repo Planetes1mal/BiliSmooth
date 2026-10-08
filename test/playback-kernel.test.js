@@ -336,7 +336,11 @@ test('measured races preserve issued signatures, bound Range bytes and route on 
     ['ignored Range is not a winner', 'bytes=0-1048575', 0, false, 1000, 200, true, true]
   ]) {
     const pending = [], store = new Map([[rankKey, JSON.stringify({ ranking: [A, B], samples: [], at: 100000 })]]);
-    const h = harness({ store, fetch: (url, init) => new Promise(resolve => pending.push({ url, init, resolve })) });
+    store.set('bilismooth.delivery-history.v1.' + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US', JSON.stringify({ version: 1,
+      rows: [...settings.candidatePool, akamai].map(host => ({ host, meanBps: host === akamai ? 30000000 : host === B ? 20000000 : 1000000,
+        weight: 1, measuredAt: 100000, failedAt: 0 })) }));
+    const h = harness({ store, globals: { Math: Object.assign(Object.create(Math), { random: () => 0.9 }) },
+      fetch: (url, init) => new Promise(resolve => pending.push({ url, init, resolve })) });
     h.scope.__playinfo__ = { dash: { video: [{ id: 120, bandwidth: 9000000, baseUrl: issued, backupUrl: [alternate] }] } };
     if (previousGoodput) {
       const healthy = new h.scope.XMLHttpRequest(); healthy.open('GET', issued); healthy.setRequestHeader('Range', 'bytes=0-131071'); healthy.send();
@@ -384,7 +388,11 @@ test('measured routing retains healthy fragments, bounds switching and preserves
   const rankKey = Kernel.constants.RANK_PREFIX + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US';
   for (const scenario of ['cooldown', 'no-switch cooldown', 'four-switch limit', 'healthy fragment', 'video retry', 'audio retry', 'missing runner-up']) {
     const pending = [], store = new Map([[rankKey, JSON.stringify({ ranking: [A, B], samples: [], at: 100000 })]]);
-    const h = harness({ store, fetch: (address, init) => new Promise(resolve => pending.push({ address, init, resolve })) });
+    store.set('bilismooth.delivery-history.v1.' + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US', JSON.stringify({ version: 1,
+      rows: settings.candidatePool.map(host => ({ host, meanBps: host === B ? 40000000 : host === C ? 30000000 : host === D ? 20000000 : 1000000,
+        weight: 1, measuredAt: 100000, failedAt: 0 })) }));
+    const h = harness({ store, globals: { Math: Object.assign(Object.create(Math), { random: () => 0.9 }) },
+      fetch: (address, init) => new Promise(resolve => pending.push({ address, init, resolve })) });
     h.scope.__playinfo__ = manifest();
     const open = (address = url(), requestedRange = range(0)) => {
       const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', address); xhr.setRequestHeader('Range', requestedRange); xhr.send(); return xhr;
