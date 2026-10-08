@@ -113,7 +113,7 @@ test('manifest preparation preserves quality metadata, input objects and mixed a
 test('backup additions retain existing alternatives, deduplicate and obey fixed-selection behavior', () => {
   const input = { data: { dash: { video: [{ baseUrl: media(A), backupUrl: [media(B), 'https://cdn.example/video.m4s'] }] } } };
   const prepared = policy.createPolicy({}).prepare(input, { ranking: [B, C] }).value;
-  assert.deepEqual(prepared.data.dash.video[0].backupUrl, [media(B), media(C), 'https://cdn.example/video.m4s']);
+  assert.deepEqual(prepared.data.dash.video[0].backupUrl, [media(B), 'https://cdn.example/video.m4s', media(C)]);
   assert.equal(policy.createPolicy({ selection: 'fixed' }).prepare(input).value, input);
   const disabled = policy.createPolicy({ enabled: false }).prepare(payload());
   assert.equal(disabled.changed, false); assert.equal(disabled.value.data.dash.video[0].baseUrl, peer);
@@ -128,13 +128,12 @@ test('the full default candidate pool retains native signed fallbacks within the
   assert.equal(backups.length, 8);
   assert.equal(new Set(backups).size, 8);
   assert.equal(backups[0], media(B));
-  assert.ok(backups.includes(native));
+  assert.equal(backups[1], native);
   assert.deepEqual(input.data.dash.video[0].backupUrl, [media(B), native]);
   assert.equal(routing.prepare(prepared).value, prepared);
   const ranking = [...settings.candidatePool].reverse();
   const reranked = routing.prepare(prepared, { ranking }).value.data.dash.video[0].backupUrl;
-  assert.equal(reranked[0], media(ranking[0]));
-  assert.ok(reranked.includes(native));
+  assert.deepEqual(reranked, backups);
 });
 
 test('live manifests can remove shared alternatives only when another usable address survives', () => {
