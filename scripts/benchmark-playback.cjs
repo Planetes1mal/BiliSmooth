@@ -10,33 +10,35 @@ const { observe, snapshot, summarize } = require('./playback-observer.cjs');
 const root = path.resolve(__dirname, '..');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const armNames = ['native', 'upstream', 'bilismooth'];
+const armNames = ['native', 'p0', 'bilismooth', 'upstream'];
+const defaultArms = ['native', 'p0', 'bilismooth'];
 const hostPolicy = require('../src/core/routing-policy.js').createPolicy({});
 
 function options(argv) {
   const value = (name, fallback) => argv.find(item => item.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
   if (argv.includes('--help')) return { help: true };
-  const mode = value('mode', 'measure'), arms = value('arms', mode === 'screen' ? 'native' : armNames.join(',')).split(',');
+  const mode = value('mode', 'measure'), arms = value('arms', mode === 'screen' ? 'native' : defaultArms.join(',')).split(',');
   if (!['screen', 'measure'].includes(mode)) throw Error('--mode must be screen or measure');
   if (!arms.length || new Set(arms).size !== arms.length || arms.some(arm => !armNames.includes(arm))) throw Error('Unknown or repeated arm');
   if (mode === 'screen' && (arms.length !== 1 || arms[0] !== 'native')) throw Error('Screening uses native only');
   if (!argv.includes('--auth')) throw Error('Benchmark requires --auth; use npm run test:login if saved login is unavailable');
   const videos = value('videos'), output = value('output');
   if (!videos || !output) throw Error('--videos and --output are required');
-  const seconds = Number(value('seconds', mode === 'screen' ? 45 : 90)), pause = Number(value('pause', 15));
-  if (!Number.isInteger(seconds) || seconds < 15 || seconds > 180) throw Error('--seconds must be 15–180');
+  const seconds = Number(value('seconds', mode === 'screen' ? 45 : 60)), pause = Number(value('pause', 15));
+  if (!Number.isInteger(seconds) || seconds < (mode === 'measure' ? 60 : 15) || seconds > 180) throw Error('--seconds must be 60–180 for measure or 15–180 for screen');
   if (!Number.isInteger(pause) || pause < 10 || pause > 20) throw Error('--pause must be 10–20');
   const label = value('label', mode);
   if (!/^[a-z0-9][a-z0-9_-]{0,79}$/i.test(label)) throw Error('Invalid --label');
   const outputPath = path.resolve(root, output);
   if (!outputPath.startsWith(path.join(root, 'outputs') + path.sep)) throw Error('--output must be inside outputs/');
   return { mode, arms, videos: path.resolve(root, videos), output: outputPath, seconds, pause, label,
+    p0: path.resolve(root, value('p0', 'work/measured-routing-p0-540fd04/extension')),
     upstream: value('upstream') ? path.resolve(root, value('upstream')) : null,
     startedAt: value('started-at'), deadline: value('deadline'), maxBytes: Number(value('max-bytes', 4 * 1024 ** 3)),
     resume: argv.includes('--resume') };
 }
 
-function normalizeVideos(input, mode) {
+function normalizeVideos(input, mode, at = Date.now()) {
   const rows = Array.isArray(input) ? input : input.videos;
   if (!Array.isArray(rows) || !rows.length) throw Error('Video file must contain a nonempty array or {videos: [...]}');
   const seen = new Set();
@@ -47,22 +49,20 @@ function normalizeVideos(input, mode) {
     const id = url.pathname.split('/')[2];
     if (seen.has(id)) throw Error(`Repeated video: ${id}`);
     seen.add(id);
-    if (mode === 'measure' && !['stutter', 'control'].includes(row.set)) throw Error(`Set must be stutter or control: ${id}`);
-    return { id, url: url.origin + '/video/' + id + '/', set: mode === 'screen' ? 'candidate' : row.set };
+    if (mode === 'measure' && !['popular', 'cold'].includes(row.set)) throw Error(`Set must be popular or cold: ${id}`);
+    if (mode === 'measure' && !cohort(row, at).includes(row.set)) throw Error(`Input metadata does not establish ${row.set} cohort: ${id}`);
+    if (!['site-default', '1080p60', '4k'].includes(row.quality || 'site-default')) throw Error(`Unsupported requested coverage: ${id}`);
+    return { id, url: url.origin + '/video/' + id + '/', set: mode === 'screen' ? 'candidate' : row.set,
+      viewCount: row.viewCount ?? null, publishedAt: row.publishedAt ?? null, verifiedAt: row.verifiedAt ?? null,
+      encoding: row.encoding ?? null, bitrateBps: row.bitrateBps ?? null, quality: row.quality || 'site-default' };
   });
 }
 
 function makeSchedule(videos, arms, mode) {
-  const schedule = [];
-  videos.forEach((video, index) => {
-    const repeats = mode === 'screen' ? 1 : video.set === 'stutter' ? 2 : 1;
-    for (let repetition = 0; repetition < repeats; repetition++) {
-      const offset = (index + repetition) % arms.length;
-      const order = [...arms.slice(offset), ...arms.slice(0, offset)];
-      for (const arm of order) schedule.push({ id: `${video.id}-${repetition + 1}-${arm}`, video, arm, repetition: repetition + 1 });
-    }
+  return videos.flatMap((video, index) => {
+    const offset = index % arms.length, order = [...arms.slice(offset), ...arms.slice(0, offset)];
+    return order.map(arm => ({ id: `${video.id}-${arm}`, video, arm, phases: mode === 'screen' ? ['startup'] : ['startup', 'reload'] }));
   });
-  return schedule;
 }
 
 function rangeLength(value) {
@@ -80,7 +80,7 @@ function isProbe(arm, initiator) {
   // The build concatenates network-probe.js without renaming measure().
   // No player methods are patched to identify probes.
   return initiatorFrames(initiator).some(frame =>
-    arm === 'bilismooth' && frame.functionName === 'measure' && /(?:^|\/)playback\.js(?:$|[?#])/.test(frame.url) ||
+    ['p0', 'bilismooth'].includes(arm) && frame.functionName === 'measure' && /(?:^|\/)playback\.js(?:$|[?#])/.test(frame.url) ||
     arm === 'upstream' && ['fetchRange', 'runRace'].includes(frame.functionName) && /(?:^|\/)bili-accelerator\.page\.js(?:$|[?#])/.test(frame.url));
 }
 
@@ -94,13 +94,14 @@ function mediaPath(raw) {
 
 function recordDash(run, payload) {
   const data = payload?.data || payload?.result || payload;
-  if (!data?.dash) return;
+  if (!data?.dash && !data?.video_info?.dash) return;
+  const dash = data.dash || data.video_info.dash;
   run.playinfoQuality = data.quality;
-  for (const kind of ['video', 'audio']) for (const representation of data.dash[kind] || []) {
+  for (const kind of ['video', 'audio']) for (const representation of dash[kind] || []) {
     const urls = [representation.baseUrl, representation.base_url, ...(representation.backupUrl || representation.backup_url || [])].filter(Boolean);
     const paths = [...new Set(urls.map(mediaPath))];
     const row = { kind, quality: representation.id, width: representation.width, height: representation.height,
-      bandwidthBps: representation.bandwidth, codec: representation.codecs, paths };
+      bandwidthBps: representation.bandwidth, codec: representation.codecs, frameRate: representation.frameRate || representation.frame_rate, paths };
     if (!run.dashRepresentations.some(existing => JSON.stringify(existing) === JSON.stringify(row))) run.dashRepresentations.push(row);
   }
 }
@@ -120,7 +121,7 @@ function createNetworkTracker(cdp, run, stop, addBytes, onBodyBytes) {
     const address = safeAddress(event.request.url), headers = event.request.headers;
     const range = Object.entries(headers).find(([key]) => key.toLowerCase() === 'range')?.[1] || null;
     const facts = hostPolicy.describe(event.request.url);
-    const row = { id: `${event.requestId}-${run.requests.length}`, ...address, resourcePath: mediaPath(event.request.url),
+    const row = { id: `${event.requestId}-${run.requests.length}`, phase: run.currentPhase || null, ...address, resourcePath: mediaPath(event.request.url),
       hostClass: facts.relaySource ? 'mcdn' : facts.shared ? 'pcdn' : facts.international ? 'international' : facts.distribution ? 'cdn' : 'other',
       method: event.request.method,
       resourceType: event.type, range, rangeLength: rangeLength(range), startedTimestamp: event.timestamp,
@@ -154,7 +155,7 @@ function createNetworkTracker(cdp, run, stop, addBytes, onBodyBytes) {
     // CDP supplies body progress before completion, including aborted probes.
     // Use the larger of body or encoded progress to avoid undercounting a budget.
     const accounted = Math.max(row.bytes, row.encodedBytes);
-    addBytes(accounted - (row.accountedBytes || 0)); row.accountedBytes = accounted;
+    addBytes(accounted - (row.accountedBytes || 0), row.phase); row.accountedBytes = accounted;
     onBodyBytes?.({ at: Date.parse(row.startedAt) + (event.timestamp - row.startedTimestamp) * 1000,
       bytes: event.dataLength, role: row.isMedia ? row.role : 'other' });
   });
@@ -163,7 +164,7 @@ function createNetworkTracker(cdp, run, stop, addBytes, onBodyBytes) {
     if (!row) return;
     row.encodedBytes = Math.max(row.encodedBytes, event.encodedDataLength);
     const accounted = Math.max(row.bytes, row.encodedBytes);
-    addBytes(accounted - (row.accountedBytes || 0)); row.accountedBytes = accounted;
+    addBytes(accounted - (row.accountedBytes || 0), row.phase); row.accountedBytes = accounted;
     finish(row, event.timestamp, 'finished');
   });
   cdp.on('Network.loadingFailed', event => {
@@ -181,31 +182,11 @@ function createNetworkTracker(cdp, run, stop, addBytes, onBodyBytes) {
   };
 }
 
-function qualityLabelMatches(actual, selected) {
-  const compact = value => String(value || '').replace(/\s+/g, '');
-  return !!selected && !/自动|auto/i.test(actual || '') && compact(actual) === compact(selected);
-}
-
 function matchesDefaultRuntime(config, defaults) {
   if (!config || config.selection !== 'auto' || !defaults.candidatePool.includes(config.pcdnHost)) return false;
   // The default automatic policy changes this target after ranking or recovery.
   // Every user preference must still match its default.
   return require('node:util').isDeepStrictEqual({ ...config, pcdnHost: defaults.pcdnHost }, defaults);
-}
-
-function qualitySettled(quality, selectedQualityId) {
-  if (!quality || !Number.isFinite(quality.nowQ) || quality.nowQ !== quality.newQ || !(quality.realQ > 0)) return false;
-  // Auto is represented by nowQ=newQ=0 while realQ names the delivered quality.
-  return selectedQualityId === undefined ? quality.nowQ === 0 || quality.realQ === quality.nowQ
-    : quality.nowQ === selectedQualityId && quality.realQ === selectedQualityId;
-}
-
-function qualityPrepared(sample, selection, representations, requests) {
-  return qualityLabelMatches(sample.quality, selection.selectedLabel) &&
-    qualitySettled(sample.nativeQuality, selection.selectedQualityId) && sample.media?.readyState >= 1 &&
-    representations.some(row => row.kind === 'video' && row.quality === selection.selectedQualityId &&
-      row.width === sample.media.width && row.height === sample.media.height &&
-      requests.some(request => request.role === 'playback' && request.bytes > 0 && row.paths.includes(request.resourcePath)));
 }
 
 function segmentJumps(samples) {
@@ -222,125 +203,84 @@ function segmentJumps(samples) {
   return jumps;
 }
 
-async function requestNativeQuality({ selectedQualityId, offeredQualityIds, lowerQualityId }) {
-  const player = window.player;
-  if (typeof player?.getQuality !== 'function' || typeof player.requestQuality !== 'function') throw Error('Native quality API is unavailable');
-  const state = () => { const quality = player.getQuality(); return { nowQ: quality.nowQ, newQ: quality.newQ, realQ: quality.realQ }; };
-  const errorInfo = error => ({ code: typeof error?.code === 'number' || typeof error?.code === 'string' ? error.code : null,
-    msg: typeof error?.msg === 'string' ? error.msg : typeof error?.message === 'string' ? error.message : typeof error === 'string' ? error : null,
-    isChange: typeof error?.isChange === 'boolean' ? error.isChange : null });
-  const before = state(), requestedAt = performance.now(), commands = [];
-  if (before.nowQ === selectedQualityId) return { requested: false, requestedAt, before, after: before, commands, error: null };
-  async function command(qualityId) {
-    const entry = { qualityId, startedAt: performance.now(), startedWallTime: Date.now(), before: state() }; commands.push(entry);
-    let timer;
-    try {
-      // Audio is deliberately unspecified. Native permission checks still apply.
-      await Promise.race([player.requestQuality(qualityId), new Promise((resolve, reject) => {
-        timer = setTimeout(() => reject(Error('Native quality request did not settle within 20 seconds')), 20000);
-      })]);
-      entry.error = null;
-    } catch (error) { entry.error = errorInfo(error); }
-    finally { clearTimeout(timer); entry.finishedAt = performance.now(); entry.finishedWallTime = Date.now(); entry.after = state(); }
-    return entry.error;
+const POST_FIRST_FRAME_MS = 60000;
+function cohort(row, at) {
+  const age = at - Date.parse(row.publishedAt);
+  const groups = [];
+  if (Number.isFinite(row.viewCount) && row.viewCount > 1000000) groups.push('popular');
+  if (Number.isFinite(row.viewCount) && row.viewCount < 1000 || Number.isFinite(age) && age >= 0 && age < 86400000) groups.push('cold');
+  return groups;
+}
+function hiddenIntervals(visibility, durationMs) {
+  return visibility.flatMap((row, index) => row.visibility !== 'visible' ? [[row.at, visibility[index + 1]?.at ?? durationMs]] : []);
+}
+function foregroundDuration(samples, firstFrameAt) {
+  return samples.reduce((sum, sample, index) => {
+    const before = samples[index - 1];
+    const active = row => row?.media && row.visibility === 'visible' && !row.media.paused && !row.media.seeking && !row.media.ended;
+    return sum + (before && before.at >= firstFrameAt && active(before) && active(sample)
+      ? Math.min(500, sample.at - before.at) : 0);
+  }, 0);
+}
+function measuredPhaseSummary(run) {
+  const hidden = hiddenIntervals(run.visibility, run.samples.at(-1)?.at || 0);
+  const overlapsHidden = (start, end) => hidden.some(([from, to]) => start < to && end > from);
+  const rawFirstFrame = run.firstFrameFromNavigationMs;
+  const eligibleFirstFrame = Number.isFinite(rawFirstFrame) && !overlapsHidden(0, rawFirstFrame);
+  const video = run.requests.filter(row => row.role === 'playback' && row.kind === 'video');
+  for (const request of run.requests) {
+    const start = Date.parse(request.startedAt) - run.timeOrigin;
+    const end = request.totalMs === null ? run.samples.at(-1)?.at || start : start + request.totalMs;
+    request.foregroundEligible = !overlapsHidden(start, end);
+    request.observedWaitMs = Math.max(0, end - start);
+    request.waitCensored = request.totalMs === null;
   }
-  let error = await command(selectedQualityId), workaround = null;
-  const current = state();
-  if (error?.code === 20004 && current.nowQ === 0 && current.newQ === 0 && offeredQualityIds.includes(selectedQualityId) &&
-    Number.isFinite(lowerQualityId) && offeredQualityIds.includes(lowerQualityId)) {
-    // The native adapter can reject the rendered index as unchanged while Auto
-    // remains active. One offered lower quality establishes a different index.
-    workaround = { reason: 'SET_QUALITY_SAME_VALUE-in-auto', lowerQualityId };
-    error = await command(lowerQualityId);
-    if (!error) error = await command(selectedQualityId);
-  }
-  return { requested: true, requestedAt, settledAt: performance.now(), before, after: state(), commands, workaround, error };
+  const eligibleVideo = video.filter(row => row.foregroundEligible);
+  const firstMinuteEvents = (run.events || []).filter(event => Number.isFinite(rawFirstFrame) && event.readyState < 3 && event.event === 'waiting' && event.at > rawFirstFrame && event.visibility === 'visible'
+    && !event.paused && !event.seeking && foregroundDuration(run.samples.filter(row => row.at <= event.at), rawFirstFrame) <= POST_FIRST_FRAME_MS);
+  const session = run.candidateDiagnostics?.session;
+  return { rawFirstFrameFromNavigationMs: rawFirstFrame, firstFrameFromNavigationMs: eligibleFirstFrame ? rawFirstFrame : null,
+    firstFrameEligible: eligibleFirstFrame, foregroundAfterFirstFrameMs: Number.isFinite(rawFirstFrame) ? foregroundDuration(run.samples, rawFirstFrame) : 0,
+    longestVideoFragmentWaitMs: eligibleVideo.length ? Math.max(...eligibleVideo.map(row => row.observedWaitMs)) : null,
+    censoredVideoRequests: eligibleVideo.filter(row => row.waitCensored).length,
+    bufferExhaustionsWithinFirst60ForegroundSeconds: firstMinuteEvents.length,
+    raceCount: session?.races?.length ?? (['native', 'p0'].includes(run.arm) ? 0 : null),
+    switchCount: session?.switchCount ?? (run.arm === 'p0' ? run.candidateDiagnostics?.recoveryAttempts ?? null : run.arm === 'native' ? 0 : null),
+    startupProbeRounds: run.arm === 'p0' ? run.candidateDiagnostics?.events?.filter(event => event.type === 'probe-start').length ?? null : 0,
+    additionalTrafficBytes: run.requests.filter(row => row.role === 'probe').reduce((sum, row) => sum + (row.bytes || 0), 0),
+    foregroundAdditionalTrafficBytes: run.requests.filter(row => row.role === 'probe' && row.foregroundEligible).reduce((sum, row) => sum + (row.bytes || 0), 0),
+    hiddenIntervals: hidden, visibilityBasis: 'Exclude whole requests overlapping a hidden interval; navigation first frame is ineligible if its interval was hidden.' };
 }
 
-async function selectQuality(page) {
-  await page.locator('.bpx-player-container').hover({ timeout: 5000 });
-  await page.locator('.bpx-player-ctrl-quality').hover({ timeout: 5000 });
-  const menu = page.locator('.bpx-player-ctrl-quality-menu-item');
-  await menu.first().waitFor({ state: 'visible', timeout: 5000 });
-  const entries = await menu.evaluateAll(items => items.map((item, index) => ({ index,
-    label: item.textContent.trim(), qualityId: Number(item.getAttribute('data-value')) || null,
-    disabled: item.getAttribute('aria-disabled') === 'true' || /disabled|locked/.test(item.className) })));
-  const candidates = entries.map(item => ({ ...item, height: Number(item.label.match(/(\d{3,4})\s*P/i)?.[1] || 0) }))
-    .filter(item => item.height > 0 && item.height <= 1080 && !/高码率|高帧率|60帧|120帧|HDR|杜比|4K|8K|增强|自动|auto/i.test(item.label))
-    .sort((a, b) => b.height - a.height || a.index - b.index);
-  const selected = candidates[0];
-  if (!selected || selected.disabled) throw Error('Native 1080P-or-lower quality is unavailable');
-  const selectedQualityId = selected.qualityId || ({ 1080: 80, 720: 64, 480: 32, 360: 16 })[selected.height] || null;
-  if (!selectedQualityId) throw Error('The native quality option has no recognized quality ID');
-  // Enumerate offered options through the menu, then use the player's own
-  // permission-checked API. Pointer selection was observed to leave Auto active.
-  await page.mouse.move(0, 0);
-  const qualityId = item => item.qualityId || ({ 1080: 80, 720: 64, 480: 32, 360: 16 })[item.height] || null;
-  const lower = candidates.find(item => !item.disabled && item.height < selected.height);
-  const nativeRequest = await page.evaluate(requestNativeQuality, { selectedQualityId,
-    offeredQualityIds: candidates.filter(item => !item.disabled).map(qualityId).filter(Number.isFinite),
-    lowerQualityId: lower ? qualityId(lower) : null });
-  return { action: 'native-quality-api', availableOptionsSource: 'native-quality-menu', requestedCeiling: 1080,
-    selectedHeight: selected.height, selectedQualityId, selectedLabel: selected.label, options: entries, nativeRequest };
-}
-
-function beginConditionedPlayback() {
-  const video = [...document.querySelectorAll('video')].sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0];
-  video.muted = true; video.playbackRate = 1;
-  const at = performance.now(); window.__benchmarkConditionedFrame = null;
-  function frame(now, metadata) {
-    // A queued frame from restored viewing history must not count as a frame at zero.
-    if (!video.seeking && !video.paused && metadata.mediaTime >= 0 && metadata.mediaTime <= 2 &&
-      Math.abs(metadata.mediaTime - video.currentTime) < 0.5) window.__benchmarkConditionedFrame = performance.now() - at;
-    else video.requestVideoFrameCallback(frame);
-  }
-  video.requestVideoFrameCallback(frame);
-  window.player.play().catch(error => window.__biliObservation.events.push({ event: 'harness-play-rejected', at: performance.now(), message: String(error) }));
-  return { at, wallTime: Date.now() };
-}
-
-async function prepareNativeStart() {
-  const video = [...document.querySelectorAll('video')].sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0];
-  const player = window.player;
-  if (typeof player?.pause !== 'function' || typeof player.seek !== 'function' || typeof player.play !== 'function')
-    throw Error('Native playback controls are unavailable');
-  const read = () => ({ currentTime: video.currentTime, paused: video.paused, seeking: video.seeking, readyState: video.readyState });
-  const result = { requestedAt: performance.now(), requestedStartTime: 0, previousTime: video.currentTime,
-    timeoutMs: 20000, before: read() };
-  video.muted = true; video.playbackRate = 1;
-  player.pause(); result.pausedAt = performance.now();
-  let timer;
-  try {
-    await Promise.race([player.seek(0), new Promise((resolve, reject) => {
-      timer = setTimeout(() => reject(Error('Native paused seek did not settle within 20 seconds')), result.timeoutMs);
-    })]);
-    result.seekResolved = true;
-  } catch (error) {
-    result.seekResolved = false;
-    result.error = { code: error?.code ?? null, msg: error?.msg ?? error?.message ?? String(error), isChange: error?.isChange ?? null };
-  } finally { clearTimeout(timer); result.finishedAt = performance.now(); result.elapsedMs = result.finishedAt - result.requestedAt; result.after = read(); }
-  return result;
+function framesPerSecond(value) { const parts = String(value).split('/').map(Number); return parts.length === 2 ? parts[0] / parts[1] : parts[0]; }
+function qualityCoverage(run, required) {
+  const frames = run.samples.filter(row => row.frames > 0 && row.visibility === 'visible' && row.media?.width > 0);
+  if (!frames.length) return false;
+  if (required === 'site-default') return true;
+  const matches = sample => required === '4k' ? Math.max(sample.media.width, sample.media.height) >= 3840
+    : Math.min(sample.media.width, sample.media.height) >= 1080 && run.dashRepresentations.some(row => row.kind === 'video'
+      && row.quality === sample.nativeQuality?.realQ && row.width === sample.media.width && row.height === sample.media.height && framesPerSecond(row.frameRate) >= 59);
+  return frames.every(matches);
 }
 
 function summarizeRun(run) {
   run.summary = summarize(run.samples);
   run.summary.firstFrameFromNavigationMs = run.firstFrameFromNavigationMs ?? run.summary.firstFrameFromNavigationMs;
-  run.summary.conditionedFirstFrameMs = run.conditionedFirstFrameMs ?? null;
   run.summary.mediaBytes = run.requests.filter(row => row.role === 'playback').reduce((sum, row) => sum + row.bytes, 0);
   run.summary.probeBytes = run.requests.filter(row => row.role === 'probe').reduce((sum, row) => sum + row.bytes, 0);
   run.summary.unknownMediaByteRequests = run.requests.filter(row => row.role === 'playback' && row.bytes === null).length;
   run.summary.unknownProbeByteRequests = run.requests.filter(row => row.role === 'probe' && row.bytes === null).length;
-  run.summary.diagnosticProbeBytes = run.candidateDiagnostics?.probeBytes ?? null;
+  run.summary.diagnosticProbeBytes = run.candidateDiagnostics?.session?.races
+    ? run.candidateDiagnostics.session.races.reduce((sum, race) => sum + race.samples.reduce((bytes, sample) => bytes + sample.bytes, 0), 0)
+    : run.candidateDiagnostics?.probeBytes ?? null;
   run.summary.deliveryHosts = [...new Set(run.requests.filter(row => row.role === 'playback' && row.bytes > 0).map(row => row.host))];
   run.summary.decodedVideoTracks = run.mediaProperties.flatMap(event => event.properties.filter(item => item.name === 'kVideoTracks').flatMap(item => {
     try { return JSON.parse(item.value).map(track => ({ codec: track.codec, codedSize: track['coded size'], naturalSize: track['natural size'] })); }
     catch { return []; }
   }));
-  const representations = run.dashRepresentations.filter(row => row.kind === 'video' && row.quality === run.qualitySelection?.selectedQualityId &&
+  const representations = run.dashRepresentations.filter(row => row.kind === 'video' &&
     run.requests.some(request => request.role === 'playback' && request.bytes > 0 && row.paths.includes(request.resourcePath)));
   const correctQualityAndRate = sample => sample.media && Math.abs(sample.media.rate - 1) < 0.01 &&
-    qualityLabelMatches(sample.quality, run.qualitySelection?.selectedLabel) &&
-    qualitySettled(sample.nativeQuality, run.qualitySelection?.selectedQualityId) &&
     representations.some(row => row.width === sample.media.width && row.height === sample.media.height);
   const active = sample => sample.media && sample.frames > 0 && !sample.media.paused && !sample.media.seeking && !sample.media.ended &&
     sample.visibility === 'visible' && sample.media.width > 0 && correctQualityAndRate(sample);
@@ -349,18 +289,14 @@ function summarizeRun(run) {
     return sum + (previous && active(previous) && active(sample) && sample.videoId === previous.videoId && sample.frames > previous.frames
       ? Math.min(500, sample.at - previous.at) : 0);
   }, 0);
-  const mismatchedSamples = run.samples.filter(sample => sample.media?.width > 0 && !correctQualityAndRate(sample)).length;
-  const wrongQualityRequests = run.requests.filter(request => request.role === 'playback' && request.kind === 'video' && request.bytes > 0 &&
-    Number.isFinite(run.conditionedWallTime) && Date.parse(request.startedAt) >= run.conditionedWallTime &&
-    request.qualityId !== undefined && request.qualityId !== run.qualitySelection?.selectedQualityId);
+  const mismatchedSamples = run.samples.filter(sample => sample.visibility === 'visible' && sample.media?.width > 0 && !correctQualityAndRate(sample)).length;
   run.segmentContinuity = { valid: true, toleranceSeconds: 2, jumps: segmentJumps(run.samples) };
   run.segmentContinuity.valid = run.segmentContinuity.jumps.length === 0;
-  run.requestedConditions = { quality: run.qualitySelection?.selectedHeight ?? null, rate: 1,
+  run.requestedConditions = { quality: 'site-default', rate: 1,
     qualityVerified: run.samples.some(active), validFrameProgressMs: run.summary.validFrameProgressMs,
     mismatchedQualityOrRateSamples: mismatchedSamples,
-    mismatchedQualityRequests: wrongQualityRequests.map(request => request.id),
     foregroundCoverage: run.samples.length ? run.summary.activeForegroundSamples / run.samples.length : 0,
-    met: run.summary.validFrameProgressMs >= 5000 && mismatchedSamples === 0 && wrongQualityRequests.length === 0 && run.segmentContinuity.valid &&
+    met: run.summary.validFrameProgressMs >= 5000 && mismatchedSamples === 0 && run.segmentContinuity.valid &&
       run.summary.activeForegroundSamples >= run.samples.length * 0.8,
     representations };
   if (!run.status) run.status = !run.segmentContinuity.valid ? 'invalid-segment'
@@ -369,19 +305,20 @@ function summarizeRun(run) {
 }
 
 async function runOne(spec, opts, auth, extensions, ledger, persist) {
-  const run = { ...spec, startedAt: new Date().toISOString(), requests: [], samples: [], mediaProperties: [], mediaErrors: [],
-    dashRepresentations: [], environment: { headed: true, viewport: { width: 2560, height: 1440 }, sound: 'muted', rate: 1,
-      freshProfile: true, extensionSettings: 'defaults', observationSeconds: opts.seconds,
-      presentationScale: 'Browser presentation scale is not controlled; decoded quality is selected independently.' } };
-  let context, page, cdp, closing, finalizeNetwork = () => {}, interval, riskCheckRunning = false, recordingQualityBytes = false;
-  const qualityByteEvents = [];
+  const run = { ...spec, startedAt: new Date().toISOString(), phases: [], requests: [], dashRepresentations: [], networkBytes: 0,
+    environment: { headed: true, viewport: { width: 2560, height: 1440 }, sound: 'muted', rate: 1,
+      freshProfile: true, extensionSettings: 'build-own-defaults', quality: 'account/site default; no selection, pause or seek',
+      phases: spec.phases, observationSecondsAfterFirstFrame: opts.seconds,
+      history: 'Startup uses a fresh profile. Immediate reload keeps that same profile, media cache and measured-routing history.' } };
+  let context, page, phase, cdp, interval, closing, finalizeNetwork = () => {}, riskCheckRunning = false;
   const stop = reason => {
     ledger.stop ||= { reason, at: new Date().toISOString(), runId: run.id };
     run.status = 'stopped'; run.stop = ledger.stop;
     if (context && !closing) closing = context.close().catch(() => {});
   };
-  const addBytes = count => {
-    ledger.networkBytes += count; run.networkBytes = (run.networkBytes || 0) + count;
+  const addBytes = (count, phaseName) => {
+    ledger.networkBytes += count; run.networkBytes += count;
+    if (phase && phase.phase === phaseName && !phase.finishedAt) phase.networkBytes += count;
     if (ledger.networkBytes >= ledger.maxBytes) stop('data-budget-exhausted');
   };
   const onSignal = () => stop('operator-interrupt');
@@ -394,35 +331,37 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
     else args.push(`--disable-extensions-except=${extensions[spec.arm]}`, `--load-extension=${extensions[spec.arm]}`);
     context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: false,
       viewport: { width: 2560, height: 1440 }, args });
-    await context.addCookies(auth.cookies);
-    await context.addInitScript(observe);
+    await context.addCookies(auth.cookies); await context.addInitScript(observe);
     await context.addInitScript(() => {
-      const mute = () => { for (const video of document.querySelectorAll('video')) video.muted = true; };
+      window.__benchmarkVisibility = [{ at: 0, visibility: document.visibilityState }];
+      document.addEventListener('visibilitychange', () => window.__benchmarkVisibility.push({ at: performance.now(), visibility: document.visibilityState }));
+      const mute = () => { for (const video of document.querySelectorAll('video')) { video.muted = true; video.playbackRate = 1; } };
       new MutationObserver(mute).observe(document, { childList: true, subtree: true }); mute();
     });
-    page = context.pages()[0] || await context.newPage();
-    await page.bringToFront();
-    run.browserVersion = context.browser()?.version();
-    cdp = await context.newCDPSession(page);
-    finalizeNetwork = createNetworkTracker(cdp, run, stop, addBytes, event => { if (recordingQualityBytes) qualityByteEvents.push(event); });
-    await cdp.send('Network.enable'); await cdp.send('Media.enable');
-    cdp.on('Media.playerPropertiesChanged', event => run.mediaProperties.push({ playerId: event.playerId,
-      properties: event.properties.filter(item => ['kVideoTracks', 'kAudioTracks', 'kVideoDecoderName', 'kAudioDecoderName', 'kResolution'].includes(item.name)) }));
-    cdp.on('Media.playerErrorsRaised', event => run.mediaErrors.push(event));
-    const pending = new Set();
-    page.on('response', response => {
-      if (response.status() === 412 || response.status() === 429) { stop(`risk-http-${response.status()}`); return; }
-      const url = new URL(response.url());
-      if (url.hostname !== 'api.bilibili.com' || !/json/i.test(response.headers()['content-type'] || '')) return;
-      const reading = response.json().then(payload => {
-        if ([-352, -412, -509].includes(payload?.code)) stop(`risk-api-${payload.code}`);
-        if (/\/(?:playurl|playinfo)(?:\/|$)/.test(url.pathname)) recordDash(run, payload);
-      }).catch(() => {});
-      pending.add(reading); reading.finally(() => pending.delete(reading));
-    });
+    page = context.pages()[0] || await context.newPage(); await page.bringToFront();
+    run.browserVersion = context.browser()?.version(); run.platform = process.platform;
+    cdp = await context.newCDPSession(page); await cdp.send('Network.enable'); await cdp.send('Media.enable');
+    finalizeNetwork = createNetworkTracker(cdp, run, stop, addBytes);
+    cdp.on('Media.playerPropertiesChanged', event => { if (phase) phase.mediaProperties.push({ playerId: event.playerId,
+      properties: event.properties.filter(item => ['kVideoTracks', 'kAudioTracks', 'kVideoDecoderName', 'kAudioDecoderName', 'kResolution'].includes(item.name)) }); });
+    cdp.on('Media.playerErrorsRaised', event => { if (phase) phase.mediaErrors.push(event); });
+    if (['p0', 'bilismooth'].includes(spec.arm)) {
+      const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 15000 });
+      run.extension = await worker.evaluate(async () => {
+        const key = BiliSmoothSettingsMigration.key, stored = await chrome.storage.local.get(key);
+        return { version: chrome.runtime.getManifest().version, name: chrome.runtime.getManifest().name,
+          defaults: BiliSmoothSettings.normalize({}), preferencesPresent: Object.hasOwn(stored, key),
+          preferencesBeforeVideo: BiliSmoothSettings.normalize(stored[key]) };
+      });
+      run.extension.defaultPreferencesVerified = require('node:util').isDeepStrictEqual(run.extension.preferencesBeforeVideo, run.extension.defaults);
+      if (!run.extension.defaultPreferencesVerified) throw Error(`${spec.arm} preferences do not match that build's defaults`);
+    }
+    await page.goto('https://www.bilibili.com/robots.txt', { waitUntil: 'domcontentloaded', timeout: 25000 });
+    run.authentication = await checkLogin(page);
+    if (run.authentication !== true) { stop(run.authentication === false ? 'saved-login-expired: run npm run test:login' : 'login-status-unavailable'); return run; }
     interval = setInterval(async () => {
       if (Date.now() >= Date.parse(ledger.deadline)) stop('time-budget-exhausted');
-      if (riskCheckRunning || ledger.stop || !page || page.isClosed()) return;
+      if (riskCheckRunning || ledger.stop || page.isClosed()) return;
       riskCheckRunning = true;
       try {
         const risk = await page.evaluate(() => {
@@ -432,165 +371,137 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
           return null;
         });
         if (risk) stop(risk);
-      } catch { /* A navigation or an immediate safety close can destroy the execution context. */ }
+      } catch { /* A navigation or immediate safety close can destroy the execution context. */ }
       finally { riskCheckRunning = false; }
     }, 1000);
-    if (spec.arm === 'bilismooth') {
-      const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 15000 });
-      run.extension = await worker.evaluate(async () => {
-        const key = BiliSmoothSettingsMigration.key, stored = await chrome.storage.local.get(key);
-        return { version: chrome.runtime.getManifest().version, name: chrome.runtime.getManifest().name,
-          preferencesPresent: Object.hasOwn(stored, key), preferencesBeforeVideo: BiliSmoothSettings.normalize(stored[key]) };
-      });
-      run.extension.defaultPreferencesVerified = require('node:util').isDeepStrictEqual(run.extension.preferencesBeforeVideo,
-        require('../src/core/settings.js').normalize({}));
-      if (!run.extension.defaultPreferencesVerified) throw Error('BiliSmooth stored preferences do not match defaults before video navigation');
-    }
-    await page.goto('https://www.bilibili.com/robots.txt', { waitUntil: 'domcontentloaded', timeout: 25000 });
-    run.authentication = await checkLogin(page);
-    if (run.authentication !== true) { stop(run.authentication === false ? 'saved-login-expired: run npm run test:login' : 'login-status-unavailable'); return run; }
-    const navigation = await page.goto(spec.video.url, { waitUntil: 'domcontentloaded', timeout: 25000 });
-    run.navigationStatus = navigation?.status();
-    if (run.navigationStatus >= 400 && !ledger.stop) { run.status = 'unavailable-video'; return run; }
-    try { await page.waitForFunction(() => !!document.querySelector('video'), undefined, { timeout: 20000 }); }
-    catch (error) { if (ledger.stop) throw error; run.status = 'unavailable-video'; return run; }
-    if (spec.arm === 'upstream') {
-      run.extension = await page.evaluate(() => ({ installed: window.__BILI_ACCELERATOR_INSTALLED__ === true,
-        configStored: localStorage.getItem('biliAccelerator.config.v2') !== null,
-        defaults: window.BiliAcceleratorCore?.normalizeConfig() || null,
-        config: window.BiliAccelerator?.getConfig(), version: window.BiliAccelerator?.getDiagnostics()?.version }));
-      if (!run.extension.installed || run.extension.version !== '0.5.0' ||
-        !require('node:util').isDeepStrictEqual(run.extension.config, run.extension.defaults))
-        throw Error('Upstream installation or default configuration could not be verified');
-    }
-    const target = new URL(page.url());
-    if (target.origin + target.pathname.replace(/\/$/, '') !== spec.video.url.replace(/\/$/, '')) { run.status = 'unavailable-video'; return run; }
-    recordDash(run, await page.evaluate(() => window.__playinfo__ || null));
-    // The site's quality setter compares against nowQ, so a request can be
-    // ignored while a different newQ is still pending. Wait for that boundary.
-    run.initialPreparation = { observations: [], timeoutMs: 20000, stableMs: 1000 };
-    const initialDeadline = Date.now() + run.initialPreparation.timeoutMs;
-    let initialStableSince = null, initialKey = null, initialReady = false;
-    while (Date.now() < initialDeadline && !ledger.stop) {
-      const sample = await page.evaluate(snapshot), quality = sample.nativeQuality;
-      const ready = sample.frames > 0 && sample.media?.readyState >= 2 && !sample.media.seeking && qualitySettled(quality);
-      const key = ready ? JSON.stringify([sample.videoId, quality]) : null;
-      run.initialPreparation.observations.push({ at: sample.at, frames: sample.frames, seeking: sample.media?.seeking,
-        nativeQuality: quality, label: sample.quality });
-      if (!ready || key !== initialKey) initialStableSince = ready ? Date.now() : null;
-      initialKey = key;
-      if (initialStableSince !== null && Date.now() - initialStableSince >= 1000) { initialReady = true; break; }
-      await delay(250);
-    }
-    if (!initialReady) {
-      if (ledger.stop) return run;
-      run.status = 'unavailable-quality'; run.error = 'The native initial quality transition did not settle before selection'; return run;
-    }
-    const bytesBeforeQuality = run.networkBytes || 0;
-    recordingQualityBytes = true;
-    try { run.qualitySelection = await selectQuality(page); }
-    catch (error) { if (ledger.stop) throw error; run.status = 'unavailable-quality'; run.error = redactReportUrls(String(error)); return run; }
-    finally { recordingQualityBytes = false; }
-    run.qualitySelection.preparationNetworkBytes = (run.networkBytes || 0) - bytesBeforeQuality;
-    for (const command of run.qualitySelection.nativeRequest.commands) {
-      const traffic = qualityByteEvents.filter(event => event.at >= command.startedWallTime && event.at <= command.finishedWallTime);
-      command.networkBodyBytes = traffic.reduce((sum, event) => sum + event.bytes, 0);
-      command.mediaBytes = traffic.filter(event => event.role === 'playback').reduce((sum, event) => sum + event.bytes, 0);
-      command.probeBytes = traffic.filter(event => event.role === 'probe').reduce((sum, event) => sum + event.bytes, 0);
-    }
-    if (run.qualitySelection.nativeRequest.error) {
-      run.status = 'unavailable-quality'; run.error = 'Native quality request failed';
-      run.nativeQualityError = run.qualitySelection.nativeRequest.error; return run;
-    }
-    // Complete native quality preparation before the timed observation starts.
-    // Metadata establishes dimensions even if the first decoded frame is slow.
-    try {
-      const qualityDeadline = Date.now() + 20000;
-      let dimensionsReady = false, stableSince = null;
-      run.qualityPreparation = { observations: [] };
-      while (Date.now() < qualityDeadline && !ledger.stop) {
-        const sample = await page.evaluate(snapshot);
-        const latestVideoRequest = [...run.requests].reverse().find(request => request.role === 'playback' && request.bytes > 0 &&
-          run.dashRepresentations.some(row => row.kind === 'video' && row.paths.includes(request.resourcePath)));
-        const latestQuality = run.dashRepresentations.find(row => row.kind === 'video' && row.paths.includes(latestVideoRequest?.resourcePath))?.quality;
-        // A completed quality switch can reuse buffered target data. An older
-        // request for the temporary lower quality does not identify the decoder.
-        dimensionsReady = qualityPrepared(sample, run.qualitySelection, run.dashRepresentations, run.requests);
-        run.qualityPreparation.observations.push({ at: sample.at, label: sample.quality, latestDeliveredQualityId: latestQuality ?? null,
-          nativeQuality: sample.nativeQuality, width: sample.media?.width, height: sample.media?.height });
-        if (dimensionsReady) stableSince ??= Date.now();
-        else stableSince = null;
-        if (stableSince !== null && Date.now() - stableSince >= 1000) break;
+    for (const name of spec.phases) {
+      if (ledger.stop) break;
+      phase = { id: `${run.id}-${name}`, arm: spec.arm, phase: name, startedAt: new Date().toISOString(),
+        historyBeforeNavigation: { profileReused: name === 'reload', routingRecordKeys: await page.evaluate(() =>
+          Object.keys(localStorage).filter(key => key.startsWith('bilismooth.routing.rank.v4.')
+            || key.startsWith('biliSmooth.playback-feedback.v1.') || key.startsWith('bilismooth.delivery-history.v1.'))) },
+        requests: [], samples: [], mediaProperties: [], mediaErrors: [],
+        dashRepresentations: [], networkBytes: 0, qualitySelection: { action: 'site-default' } };
+      run.phases.push(phase);
+      run.currentPhase = name; const currentPhase = phase;
+      const pending = new Set();
+      const onResponse = response => {
+        if (response.status() === 412 || response.status() === 429) { stop(`risk-http-${response.status()}`); return; }
+        const url = new URL(response.url());
+        if (url.hostname !== 'api.bilibili.com' || !/json/i.test(response.headers()['content-type'] || '')) return;
+        const reading = response.json().then(payload => {
+          if ([-352, -412, -509].includes(payload?.code)) stop(`risk-api-${payload.code}`);
+          if (/\/(?:playurl|playinfo)(?:\/|$)/.test(url.pathname)) { recordDash(currentPhase, payload); recordDash(run, payload); }
+        }).catch(() => {});
+        pending.add(reading); reading.finally(() => pending.delete(reading));
+      };
+      page.on('response', onResponse);
+      const navigation = name === 'reload'
+        ? await page.reload({ waitUntil: 'domcontentloaded', timeout: 25000 })
+        : await page.goto(spec.video.url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+      phase.navigationStatus = navigation?.status();
+      if (phase.navigationStatus >= 400 && !ledger.stop) { phase.status = 'unavailable-video'; page.off('response', onResponse); break; }
+      const target = new URL(page.url());
+      if (target.origin + target.pathname.replace(/\/$/, '') !== spec.video.url.replace(/\/$/, '')) { phase.status = 'unavailable-video'; page.off('response', onResponse); break; }
+      phase.timeOrigin = await page.evaluate(() => performance.timeOrigin);
+      if (spec.arm === 'upstream') {
+        await page.waitForFunction(() => window.__BILI_ACCELERATOR_INSTALLED__ === true, undefined, { timeout: 20000 });
+        run.extension = await page.evaluate(() => ({ installed: window.__BILI_ACCELERATOR_INSTALLED__ === true,
+          defaults: window.BiliAcceleratorCore?.normalizeConfig() || null,
+          config: window.BiliAccelerator?.getConfig(), version: window.BiliAccelerator?.getDiagnostics()?.version }));
+        if (!run.extension.installed || run.extension.version !== '0.5.0' || !require('node:util').isDeepStrictEqual(run.extension.config, run.extension.defaults))
+          throw Error('Upstream installation or default configuration could not be verified');
+      }
+      const phaseDeadline = Date.now() + (opts.seconds + 30) * 1000; let lastCheckpoint = Date.now();
+      while (Date.now() < phaseDeadline && !ledger.stop) {
+        const sample = await page.evaluate(snapshot); phase.samples.push(sample);
+        const observed = await page.evaluate(() => ({ firstFrame: window.__biliObservation.firstPrimaryFrameAt,
+          events: window.__biliObservation.events, visibility: window.__benchmarkVisibility,
+          video: window.__INITIAL_STATE__?.videoData ? { viewCount: window.__INITIAL_STATE__.videoData.stat?.view,
+            publishedAt: Number.isFinite(window.__INITIAL_STATE__.videoData.pubdate) ? new Date(window.__INITIAL_STATE__.videoData.pubdate * 1000).toISOString() : null } : null }));
+        phase.firstFrameFromNavigationMs = observed.firstFrame; phase.events = observed.events; phase.visibility = observed.visibility;
+        if (observed.video) phase.siteMetadata = observed.video;
+        if (!phase.dashRepresentations.length) { const payload = await page.evaluate(() => window.__playinfo__ || null); recordDash(phase, payload); recordDash(run, payload); }
+        if (sample.media?.error) { phase.status = 'failed-media'; break; }
+        if (Number.isFinite(observed.firstFrame) && foregroundDuration(phase.samples, observed.firstFrame) >= opts.seconds * 1000) break;
+        if (Date.now() - lastCheckpoint >= 5000) { lastCheckpoint = Date.now(); finalizeNetwork(); await persist(run); }
         await delay(250);
       }
-      if (!dimensionsReady || stableSince === null || Date.now() - stableSince < 1000) throw Error('Selected fixed quality unavailable');
-    } catch (error) { if (ledger.stop) throw error; run.status = 'unavailable-quality'; run.error = 'Selected fixed quality and decoded dimensions were not established after native preparation'; return run; }
-    run.firstFrameFromNavigationMs = await page.evaluate(() => window.__biliObservation.firstPrimaryFrameAt);
-    run.startPreparation = await page.evaluate(prepareNativeStart);
-    try {
-      if (!run.startPreparation.seekResolved) throw Error('Native paused seek did not complete');
-      await page.waitForFunction(() => {
-        const video = [...document.querySelectorAll('video')].sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0];
-        return video && video.paused && !video.seeking && video.readyState >= 2 && video.currentTime >= 0 && video.currentTime <= 1;
-      }, undefined, { timeout: Math.max(1, run.startPreparation.timeoutMs - run.startPreparation.elapsedMs) });
-      run.startPreparation.completed = true;
-      run.startPreparation.result = await page.evaluate(snapshot);
-      if (!qualityLabelMatches(run.startPreparation.result.quality, run.qualitySelection.selectedLabel) ||
-        !qualitySettled(run.startPreparation.result.nativeQuality, run.qualitySelection.selectedQualityId)) throw Error('Quality changed during seek preparation');
-    } catch (error) {
-      if (ledger.stop) throw error;
-      run.startPreparation.completed = false;
-      run.startPreparation.result = await page.evaluate(snapshot);
-      run.status = 'invalid-start'; run.error = 'The requested beginning and fixed quality were not established within 20 seconds'; return run;
-    }
-    const conditioned = await page.evaluate(beginConditionedPlayback);
-    run.conditionedAt = conditioned.at; run.conditionedWallTime = conditioned.wallTime;
-    const start = Date.now(); let lastCheckpoint = start, retriedPlayback = false;
-    while (Date.now() - start < opts.seconds * 1000 && !ledger.stop) {
-      const sample = await page.evaluate(snapshot); run.samples.push(sample);
-      if (!retriedPlayback && sample.media && sample.media.readyState >= 1 && (sample.media.paused || Math.abs(sample.media.rate - 1) > 0.01)) {
-        retriedPlayback = true;
-        await page.evaluate(() => { const video = [...document.querySelectorAll('video')].sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0];
-          video.muted = true; video.playbackRate = 1; void video.play().catch(() => {}); });
+      if (!ledger.stop) {
+        phase.candidateDiagnostics = await page.evaluate(() => window.BiliSmoothSession?.getDiagnostics() || null);
+        if (spec.arm === 'upstream') phase.upstreamDiagnostics = await page.evaluate(() => window.BiliAccelerator.getDiagnostics());
+        if (['p0', 'bilismooth'].includes(spec.arm)) {
+          phase.defaultSettingsVerified = phase.samples.every(sample => sample.scheduler?.candidate && matchesDefaultRuntime(sample.scheduler.config, run.extension.defaults));
+          if (!phase.defaultSettingsVerified) throw Error(`${spec.arm} runtime preferences differ from that build's defaults`);
+        }
+        await Promise.race([Promise.allSettled([...pending]), delay(500)]);
+        finalizeNetwork(); phase.requests = structuredClone(run.requests.filter(row => row.phase === name)); summarizeRun(phase); Object.assign(phase.summary, measuredPhaseSummary(phase));
+        phase.observedCohorts = phase.siteMetadata ? cohort(phase.siteMetadata, Date.parse(phase.startedAt)) : [];
+        phase.observedConditions = { codecAndBitrate: phase.requestedConditions.representations,
+          dimensions: phase.summary.dimensions, rates: phase.summary.rates, firstObservedPlayhead: phase.samples.find(row => row.frames > 0)?.media?.currentTime,
+          requiredQuality: spec.video.quality, coverageMet: qualityCoverage(phase, spec.video.quality) };
+        if (opts.mode === 'measure' && (!phase.summary.firstFrameEligible || phase.summary.foregroundAfterFirstFrameMs < POST_FIRST_FRAME_MS || !phase.observedCohorts.includes(spec.video.set) || !phase.observedConditions.coverageMet))
+          phase.status = 'incomplete-playback-observation';
       }
-      if (Date.now() - lastCheckpoint >= 5000) { lastCheckpoint = Date.now(); finalizeNetwork(); await persist(run); }
-      await delay(250);
+      phase.finishedAt = new Date().toISOString(); page.off('response', onResponse);
+      // No pause, new profile, state clearing, or quality manipulation before reload.
+      await persist(run);
     }
-    if (!ledger.stop) {
-      run.conditionedFirstFrameMs = await page.evaluate(() => window.__benchmarkConditionedFrame);
-      const observation = await page.evaluate(() => window.__biliObservation);
-      run.firstFrameFromNavigationMs = observation.firstPrimaryFrameAt;
-      const ids = new Set(run.samples.map(sample => sample.videoId));
-      run.events = observation.events.filter(event => ids.has(event.videoId));
-      run.candidateDiagnostics = await page.evaluate(() => window.BiliSmoothSession?.getDiagnostics() || null);
-      if (spec.arm === 'upstream') run.upstreamDiagnostics = await page.evaluate(() => window.BiliAccelerator.getDiagnostics());
-      if (spec.arm === 'bilismooth') {
-        const state = run.samples.at(-1)?.scheduler, defaults = require('../src/core/settings.js').normalize({});
-        run.defaultSettingsVerified = run.extension.defaultPreferencesVerified && run.samples.every(sample =>
-          sample.scheduler?.candidate && matchesDefaultRuntime(sample.scheduler.config, defaults));
-        run.runtimeAutoTargets = [...new Set(run.samples.map(sample => sample.scheduler?.config?.pcdnHost).filter(Boolean))];
-        if (!state?.candidate || !run.defaultSettingsVerified) throw Error('BiliSmooth default settings or session could not be verified');
-      }
-      await Promise.race([Promise.allSettled([...pending]), delay(500)]);
-    }
+    if (!run.status) run.status = run.phases.length === spec.phases.length && run.phases.every(row => row.status === 'observed') ? 'observed' : 'incomplete-playback-observation';
+    run.summary = run.phases.map(row => ({ phase: row.phase, status: row.status, ...row.summary, observedConditions: row.observedConditions }));
   } catch (error) {
     run.error = redactReportUrls(String(error));
     if (!ledger.stop) { run.status = 'failed-harness'; ledger.stop = { reason: 'run-failed', runId: run.id, at: new Date().toISOString() }; }
   } finally {
-    clearInterval(interval);
-    if (page && !page.isClosed() && !closing) {
-      try {
-        const observation = await page.evaluate(() => window.__biliObservation);
-        if (observation) { run.events ||= observation.events; run.firstFrameFromNavigationMs = observation.firstPrimaryFrameAt; }
-      } catch { /* Context loss during a safety close leaves earlier checkpoints intact. */ }
-    }
-    if (context) await (closing || context.close());
-    finalizeNetwork();
-    run.finishedAt = new Date().toISOString(); summarizeRun(run);
-    await persist(run);
+    clearInterval(interval); if (context) await (closing || context.close()); finalizeNetwork();
+    for (const entry of run.phases) if (!entry.finishedAt) entry.requests = structuredClone(run.requests.filter(row => row.phase === entry.phase));
+    delete run.requests; delete run.dashRepresentations; delete run.currentPhase;
+    run.finishedAt = new Date().toISOString(); await persist(run);
     process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal);
   }
   return run;
+}
+
+
+function summarizeGroups(results) {
+  const groups = new Map();
+  for (const run of results) for (const phase of run.summary || []) {
+    const key = [run.arm, run.video.set, phase.phase].join('|');
+    if (!groups.has(key)) groups.set(key, { arm: run.arm, cohort: run.video.set, phase: phase.phase, rows: [] });
+    groups.get(key).rows.push(phase);
+  }
+  return [...groups.values()].map(group => {
+    const eligible = group.rows.filter(row => row.status === 'observed' && Number.isFinite(row.firstFrameFromNavigationMs));
+    const frames = eligible.map(row => row.firstFrameFromNavigationMs).sort((a,b) => a-b), middle = Math.floor(frames.length/2);
+    const medianFirstFrameMs = frames.length ? frames.length%2 ? frames[middle] : (frames[middle-1]+frames[middle])/2 : null;
+    const p90FirstFrameMs = frames.length ? frames[Math.ceil(frames.length*.9)-1] : null;
+    const longestVideoFragmentWaitMs = eligible.length ? Math.max(...eligible.map(row => row.longestVideoFragmentWaitMs || 0)) : null;
+    const bufferExhaustions = eligible.reduce((sum,row) => sum + row.bufferExhaustionsWithinFirst60ForegroundSeconds,0);
+    const censoredRequests = eligible.reduce((sum,row) => sum + row.censoredVideoRequests,0);
+    return { arm: group.arm, cohort: group.cohort, phase: group.phase, included: eligible.length, excluded: group.rows.length-eligible.length,
+      medianFirstFrameMs, p90FirstFrameMs, percentileMethod: 'nearest rank', longestVideoFragmentWaitMs, bufferExhaustions, censoredRequests,
+      goalEvidenceComplete: eligible.length >= 3 && eligible.length === group.rows.length && censoredRequests === 0,
+      observedTargetsMet: eligible.length >= 3 && eligible.length === group.rows.length && censoredRequests === 0
+        ? medianFirstFrameMs <= 3000 && p90FirstFrameMs <= 6000 && longestVideoFragmentWaitMs <= 3000 && bufferExhaustions === 0 : null };
+  });
+}
+
+function summarizeComparisons(results, arms) {
+  const videos = [...new Set(results.map(run => run.video.id))];
+  return videos.flatMap(video => ['startup', 'reload'].map(name => {
+    const observations = arms.map(arm => {
+      const run = results.find(row => row.video.id === video && row.arm === arm);
+      const phase = run?.summary?.find(row => row.phase === name);
+      return { arm, status: phase?.status || 'missing', dimensions: phase?.observedConditions?.dimensions || [],
+        rates: phase?.observedConditions?.rates || [], representations: phase?.observedConditions?.codecAndBitrate || [],
+        firstObservedPlayhead: phase?.observedConditions?.firstObservedPlayhead ?? null };
+    });
+    const signature = row => JSON.stringify({ dimensions: [...row.dimensions].sort(), rates: [...row.rates].sort(),
+      qualities: [...new Set(row.representations.map(rep => rep.quality))].sort() });
+    return { video, phase: name, observations,
+      sameObservedQualityAndRate: observations.every(row => row.status === 'observed') && observations.every(row => signature(row) === signature(observations[0])),
+      limitation: 'Account-default playback may start at different restored positions or adapt quality. Compare only matching observed conditions; no pause, seek or quality correction was injected.' };
+  }));
 }
 
 async function writeJson(file, value) { await fs.writeFile(file, JSON.stringify(redactReportUrls(value), null, 2) + '\n'); }
@@ -599,29 +510,32 @@ async function main(argv = process.argv.slice(2)) {
   const opts = options(argv);
   if (opts.help) {
     console.log([
-      'npm run benchmark -- --videos=outputs/benchmark-YYYYMMDD/videos.json --arms=native,upstream,bilismooth --upstream=work/bilibili-accelerator/dist/extension --auth --output=outputs/benchmark-YYYYMMDD',
+      'npm run benchmark -- --videos=work/p2/videos.json "--arms=native,p0,bilismooth" --p0=work/measured-routing-p0-540fd04/extension --auth --output=outputs/benchmark-YYYYMMDD',
       '',
-      'Video file example (replace the example IDs with actual video IDs):',
-      '[{"id":"BV1example","set":"stutter"},{"id":"BV2example","set":"control"}]',
-      'Each entry accepts id or a normal Bilibili video-page url. Measurement requires set=stutter or control.',
-      'Stutter videos run twice per arm; controls run once. Arms are interleaved and their order rotates.',
+      'Video input:',
+      'Use verified IDs and metadata; see docs/validation/playback-testing.md. No sample IDs are supplied.',
+      'Each entry requires popular/cold set, verified viewCount/publishedAt, and expected quality coverage. Actual codec/bitrate/decoded dimensions are recorded.',
+      'Each video/arm uses one fresh profile: startup then immediate reload in the same profile. Arm order rotates across videos.',
       '',
       'Create and freeze plan.md inside --output before starting. Its hash is checked on later runs.',
       '--mode=screen: native only, one 45-second run per candidate; set is ignored.',
-      '--mode=measure: 90 seconds per run (default). --seconds=15..180 overrides the duration.',
+      '--mode=measure: at least 60 foreground seconds after first frame in each phase; --seconds=60..180 (default 60).',
       '--pause=15: seconds between runs; allowed range 10..20.',
       '--max-bytes=4294967296: default 4 GiB cumulative network budget; can only be reduced.',
       '--started-at=ISO --deadline=ISO: default deadline is three hours after the recorded start.',
       '--label=NAME: separate schedule within the output directory; defaults to the mode.',
       '--resume: continue the identical schedule. It cannot clear a recorded stop or repeat a partial run.',
       'All labels in one output directory share budget.json. Existing --auth login is required.',
-      'Runs use fresh headed Chromium profiles, muted audio, 1x, a 2560x1440 viewport, and ordinary 1080P or the highest offered quality below it.'
+      'Runs use headed Chromium, muted audio, 1x and account/site-default quality. No premeasurement quality selection, pause or seek.' ,
+      '--upstream=PATH remains supported when --arms includes upstream; its default version check remains v0.5.0.'
     ].join('\n'));
     return;
   }
   await fs.mkdir(opts.output, { recursive: true }); await fs.mkdir(path.join(root, 'work'), { recursive: true });
   const plan = await fs.readFile(path.join(opts.output, 'plan.md'), 'utf8');
   const videos = normalizeVideos(JSON.parse(await fs.readFile(opts.videos, 'utf8')), opts.mode);
+  if (opts.mode === 'measure' && ['popular','cold'].some(set => videos.filter(row => row.set === set).length < 3)) throw Error('Measurement needs at least three popular and three cold videos');
+  if (opts.mode === 'measure' && ['1080p60','4k'].some(quality => !videos.some(row => row.quality === quality))) throw Error('Register at least one 1080p60 and one 4k coverage sample; the script will verify actual playback without selecting quality');
   const auth = await loadAuthState(root);
   if (!auth) throw Error('Saved login is missing; run npm run test:login');
   const ledgerPath = path.join(opts.output, 'budget.json');
@@ -639,17 +553,21 @@ async function main(argv = process.argv.slice(2)) {
   if (Date.now() >= Date.parse(ledger.deadline) || ledger.networkBytes >= ledger.maxBytes) throw Error('Benchmark budget is exhausted');
   const extensions = {};
   for (const arm of opts.arms.filter(arm => arm !== 'native')) {
-    const directory = arm === 'bilismooth' ? path.join(root, 'dist', 'extension') : opts.upstream;
+    const directory = arm === 'bilismooth' ? path.join(root, 'dist', 'extension') : arm === 'p0' ? opts.p0 : opts.upstream;
     if (!directory) throw Error('--upstream is required for the upstream arm');
     const manifest = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'));
     if (manifest.manifest_version !== 3) throw Error(`${arm} must be an MV3 build`);
     if (arm === 'bilismooth') await assertBuildMatches(root, directory);
+    if (arm === 'p0') {
+      const build = JSON.parse(await fs.readFile(path.join(directory, 'BUILD.json'), 'utf8'));
+      for (const [file, expected] of Object.entries(build.outputSha256)) if (hash(await fs.readFile(path.join(directory, file))) !== expected) throw Error(`P0 build checksum mismatch: ${file}`);
+    }
     extensions[arm] = directory;
   }
   const schedulePath = path.join(opts.output, `${opts.label}-schedule.json`);
   const runsPath = path.join(opts.output, `${opts.label}-runs`);
   const schedule = makeSchedule(videos, opts.arms, opts.mode);
-  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, schedule };
+  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
   let previous;
   try { previous = JSON.parse(await fs.readFile(schedulePath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (previous && !opts.resume) throw Error('Schedule exists; use --resume or another label');
@@ -657,7 +575,7 @@ async function main(argv = process.argv.slice(2)) {
   const report = previous || { createdAt: new Date().toISOString(), settingsSha256: hash(JSON.stringify(settings)), ...settings, results: [],
     observation: { sampleMs: 250, stallThresholdMs: 1500, definition: 'Shared check-playback observer: after first frame, no frame progress for >=1500 ms while foreground, playing, not seeking or ended. Startup is separate.' },
     network: { bytes: 'CDP body bytes, including partial requests. Budget uses max(body, encoded) per request for all page traffic.',
-      probeClassification: 'BiliSmooth playback.js initiator frame named measure; independently compare diagnostic probeBytes.',
+      probeClassification: 'BiliSmooth playback.js initiator frame named measure; compare P0 probeBytes or P1 session race sample bytes.',
       ttfb: 'Request start to response headers, including connection setup; serverWaitMs excludes setup when available.',
       privacy: 'Only media host/path and selected decoder fields are retained. URL queries, cookies, titles and page text are omitted.' } };
   await fs.mkdir(runsPath, { recursive: true }); await writeJson(ledgerPath, ledger); await writeJson(schedulePath, report);
@@ -674,26 +592,28 @@ async function main(argv = process.argv.slice(2)) {
     console.log(JSON.stringify({ event: 'run-start', id: spec.id, arm: spec.arm, set: spec.video.set, bytesUsed: ledger.networkBytes }));
     const recent = (ledger.runHistory || []).slice(-5);
     const expectedBytes = Math.max(64 * 1024 ** 2, ...recent.map(run => run.networkBytes * 1.25));
-    const expectedMs = (opts.seconds + opts.pause + 30) * 1000;
+    const expectedMs = (spec.phases.length * (opts.seconds + 30) + opts.pause) * 1000;
     if (ledger.maxBytes - ledger.networkBytes < expectedBytes || Date.parse(ledger.deadline) - Date.now() < expectedMs) {
       ledger.stop = { reason: 'insufficient-budget-for-next-run', at: new Date().toISOString(), expectedBytes, expectedMs }; break;
     }
     const run = await runOne(spec, opts, auth, extensions, ledger, persist);
     (ledger.runHistory ||= []).push({ networkBytes: run.networkBytes || 0, durationMs: Date.parse(run.finishedAt) - Date.parse(run.startedAt) });
-    report.results.push({ id: run.id, video: run.video, arm: run.arm, repetition: run.repetition, status: run.status,
+    report.results.push({ id: run.id, video: run.video, arm: run.arm, phases: run.phases.map(row => ({phase:row.phase,status:row.status})), status: run.status,
       summary: run.summary, file: path.relative(opts.output, runPath).replaceAll('\\', '/') });
     await writeJson(schedulePath, report);
     console.log(JSON.stringify({ event: 'run-finish', id: run.id, status: run.status, summary: run.summary, stop: ledger.stop }));
     if (ledger.stop) break;
     if (report.results.length < schedule.length) await delay(opts.pause * 1000);
   }
+  report.groups = summarizeGroups(report.results);
+  report.comparisons = summarizeComparisons(report.results, opts.arms);
   report.finishedAt = new Date().toISOString(); report.stop = ledger.stop;
-  report.status = ledger.stop ? 'stopped' : report.results.length === schedule.length ? 'complete' : 'incomplete';
+  report.status = ledger.stop ? 'stopped' : report.results.length === schedule.length && report.results.every(row => row.status === 'observed') ? 'complete' : 'incomplete';
   await writeJson(ledgerPath, ledger); await writeJson(schedulePath, report);
   console.log(JSON.stringify({ report: schedulePath, status: report.status, budget: ledger }));
   if (report.status !== 'complete') process.exitCode = 2;
 }
 
 module.exports = { options, normalizeVideos, makeSchedule, rangeLength, isProbe, createNetworkTracker, recordDash, summarizeRun,
-  qualityLabelMatches, beginConditionedPlayback, prepareNativeStart, matchesDefaultRuntime, qualitySettled, qualityPrepared, segmentJumps, requestNativeQuality };
+  summarizeGroups, summarizeComparisons, cohort, hiddenIntervals, foregroundDuration, measuredPhaseSummary, qualityCoverage, matchesDefaultRuntime, segmentJumps };
 if (require.main === module) main().catch(error => { console.error(redactReportUrls(String(error))); process.exitCode = 1; });
