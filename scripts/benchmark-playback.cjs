@@ -37,10 +37,10 @@ function options(argv) {
     p0: path.resolve(root, value('p0', 'work/measured-routing-p0-540fd04/extension')),
     upstream: value('upstream') ? path.resolve(root, value('upstream')) : null,
     startedAt: value('started-at'), deadline: value('deadline'), maxBytes: Number(value('max-bytes', 4 * 1024 ** 3)),
-    resume: argv.includes('--resume') };
+    resume: argv.includes('--resume'), reportedOnly: argv.includes('--reported-only') };
 }
 
-function normalizeVideos(input, mode, at = Date.now()) {
+function normalizeVideos(input, mode, at = Date.now(), reportedOnly = false) {
   const rows = Array.isArray(input) ? input : input.videos;
   if (!Array.isArray(rows) || !rows.length) throw Error('Video file must contain a nonempty array or {videos: [...]}');
   const seen = new Set();
@@ -51,8 +51,9 @@ function normalizeVideos(input, mode, at = Date.now()) {
     const id = url.pathname.split('/')[2];
     if (seen.has(id)) throw Error(`Repeated video: ${id}`);
     seen.add(id);
-    if (mode === 'measure' && !['popular', 'cold'].includes(row.set)) throw Error(`Set must be popular or cold: ${id}`);
-    if (mode === 'measure' && !cohort(row, at).includes(row.set)) throw Error(`Input metadata does not establish ${row.set} cohort: ${id}`);
+    const reference = reportedOnly && row.set === 'reference';
+    if (mode === 'measure' && !['popular', 'cold'].includes(row.set) && !reference) throw Error(`Set must be popular or cold: ${id}`);
+    if (mode === 'measure' && !reference && !cohort(row, at).includes(row.set)) throw Error(`Input metadata does not establish ${row.set} cohort: ${id}`);
     if (!['site-default', '1080p60', '4k'].includes(row.quality || 'site-default')) throw Error(`Unsupported requested coverage: ${id}`);
     return { id, url: url.origin + '/video/' + id + '/', set: mode === 'screen' ? 'candidate' : row.set,
       viewCount: row.viewCount ?? null, publishedAt: row.publishedAt ?? null, verifiedAt: row.verifiedAt ?? null,
@@ -445,7 +446,7 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
         phase.observedConditions = { codecAndBitrate: phase.requestedConditions.representations,
           dimensions: phase.summary.dimensions, rates: phase.summary.rates, firstObservedPlayhead: phase.samples.find(row => row.frames > 0)?.media?.currentTime,
           requiredQuality: spec.video.quality, coverageMet: qualityCoverage(phase, spec.video.quality) };
-        if (opts.mode === 'measure' && (!phase.summary.firstFrameEligible || phase.summary.foregroundAfterFirstFrameMs < POST_FIRST_FRAME_MS || !phase.observedCohorts.includes(spec.video.set) || !phase.observedConditions.coverageMet))
+        if (opts.mode === 'measure' && (!phase.summary.firstFrameEligible || phase.summary.foregroundAfterFirstFrameMs < POST_FIRST_FRAME_MS || spec.video.set !== 'reference' && !phase.observedCohorts.includes(spec.video.set) || !phase.observedConditions.coverageMet))
           phase.status = 'incomplete-playback-observation';
       }
       phase.finishedAt = new Date().toISOString(); page.off('response', onResponse);
@@ -530,6 +531,7 @@ async function main(argv = process.argv.slice(2)) {
       '--max-bytes=4294967296: default 4 GiB cumulative network budget; can only be reduced.',
       '--started-at=ISO --deadline=ISO: default deadline is three hours after the recorded start.',
       '--label=NAME: separate schedule within the output directory; defaults to the mode.',
+      '--reported-only: a reported, unscored subset; skips the 3+3 and 1080p60/4K registration and accepts set "reference" without a cohort.',
       '--resume: continue the identical schedule. It cannot clear a recorded stop or repeat a partial run.',
       'All labels in one output directory share budget.json. Existing --auth login is required.',
       'Runs use headed Chromium, muted audio, the requested rate and account/site-default quality. No premeasurement quality selection, pause or seek.' ,
@@ -539,9 +541,9 @@ async function main(argv = process.argv.slice(2)) {
   }
   await fs.mkdir(opts.output, { recursive: true }); await fs.mkdir(path.join(root, 'work'), { recursive: true });
   const plan = await fs.readFile(path.join(opts.output, 'plan.md'), 'utf8');
-  const videos = normalizeVideos(JSON.parse(await fs.readFile(opts.videos, 'utf8')), opts.mode);
-  if (opts.mode === 'measure' && ['popular','cold'].some(set => videos.filter(row => row.set === set).length < 3)) throw Error('Measurement needs at least three popular and three cold videos');
-  if (opts.mode === 'measure' && ['1080p60','4k'].some(quality => !videos.some(row => row.quality === quality))) throw Error('Register at least one 1080p60 and one 4k coverage sample; the script will verify actual playback without selecting quality');
+  const videos = normalizeVideos(JSON.parse(await fs.readFile(opts.videos, 'utf8')), opts.mode, Date.now(), opts.reportedOnly);
+  if (opts.mode === 'measure' && !opts.reportedOnly && ['popular','cold'].some(set => videos.filter(row => row.set === set).length < 3)) throw Error('Measurement needs at least three popular and three cold videos');
+  if (opts.mode === 'measure' && !opts.reportedOnly && ['1080p60','4k'].some(quality => !videos.some(row => row.quality === quality))) throw Error('Register at least one 1080p60 and one 4k coverage sample; the script will verify actual playback without selecting quality');
   const auth = await loadAuthState(root);
   if (!auth) throw Error('Saved login is missing; run npm run test:login');
   const ledgerPath = path.join(opts.output, 'budget.json');
@@ -573,7 +575,7 @@ async function main(argv = process.argv.slice(2)) {
   const schedulePath = path.join(opts.output, `${opts.label}-schedule.json`);
   const runsPath = path.join(opts.output, `${opts.label}-runs`);
   const schedule = makeSchedule(videos, opts.arms, opts.mode);
-  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, rate: opts.rate, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
+  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, rate: opts.rate, reportedOnly: opts.reportedOnly, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
   let previous;
   try { previous = JSON.parse(await fs.readFile(schedulePath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (previous && !opts.resume) throw Error('Schedule exists; use --resume or another label');
