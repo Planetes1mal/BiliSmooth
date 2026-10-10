@@ -171,12 +171,13 @@ test('measured races preserve issued signatures, bound Range bytes and route on 
   const akamai = 'upos-hz-mirrorakam.akamaized.net', bytes = 768 * 1024;
   const issued = `https://${A}/upgcxcode/1/42231991605-1-30080.m4s?sign=UPOS%2Bprivate`;
   const alternate = issued.replace(A, akamai).replace('UPOS', 'AKAMAI');
-  for (const [name, range, loaded, finished, duration, firstStatus, runner, switched, previousGoodput] of [
+  for (const [name, range, loaded, finished, duration, firstStatus, runner, switched, previousGoodput, completesDuringRace] of [
     ['remaining fragment', 'bytes=4096-2101247', 131072, false, 1000, 206, true, true],
     ['next fragment', 'bytes=0-131071', 131072, true, 1000, 206, true, true],
     ['zero-byte hang after healthy fragments', 'bytes=1024-33791', 0, false, 1000, 206, false, true, true],
     ['current host stays faster', 'bytes=0-2097151', 1048576, false, 100, 206, true, false],
-    ['ignored Range is not a winner', 'bytes=0-1048575', 0, false, 1000, 200, true, true]
+    ['ignored Range is not a winner', 'bytes=0-1048575', 0, false, 1000, 200, true, true],
+    ['current completes before the winner', 'bytes=0-1048575', 0, false, 1000, 206, true, false, false, true]
   ]) {
     const pending = [], store = new Map();
     store.set('bilismooth.delivery-history.v1.' + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US', JSON.stringify({ version: 1,
@@ -203,6 +204,7 @@ test('measured races preserve issued signatures, bound Range bytes and route on 
       assert.equal(item.init.credentials, 'omit'); assert.equal(item.init.mode, 'cors');
     }
     const response = status => ({ status, body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(expectedBytes) }) }) } });
+    if (completesDuringRace) { await h.advance(100); xhr.progress(end - start + 1); xhr.complete(end - start + 1); }
     await h.advance(200); pending[0].resolve(response(firstStatus)); await h.flush();
     const early = h.kernel.getState().session;
     assert.equal(early.racing, true, name);
@@ -213,6 +215,7 @@ test('measured races preserve issued signatures, bound Range bytes and route on 
     else await h.advance(3800);
     const final = h.kernel.getState().session, result = final.lastRace;
     assert.equal(final.racing, false, name); assert.equal(result.switched, switched, name);
+    if (completesDuringRace) assert.equal(result.verdict, 'current-fastest', name);
     assert.equal(result.winner, firstStatus === 206 ? akamai : B, name);
     assert.equal(result.runnerUp, runner && firstStatus === 206 ? B : null, name);
     assert.ok(result.samples.reduce((sum, item) => sum + item.bytes, 0) <= 2 * bytes, name);

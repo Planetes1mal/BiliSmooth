@@ -221,13 +221,15 @@
         row.automaticDelayMs = row.automaticDelayMs ? row.automaticDelayMs * C.RACE_COOLDOWN_MULTIPLIER : C.RACE_COOLDOWN_MS;
         row.nextTestAt = wallNow() + C.RACE_COOLDOWN_MS; row.nextAutomaticAt = wallNow() + row.automaticDelayMs;
       }
-      const round = { cid: session.cid, controller: new root.AbortController() }; measuredRace = round;
+      const round = { cid: session.cid, controller: new root.AbortController() }, raceStartedAt = now(); measuredRace = round;
       log('race', { reason: 'started', id: request.id, host: currentHost });
       Probes.race({ scope: root, now, fetch: nativeFetch, signal: round.controller.signal, range: { start, end }, targets,
         onWinner(sample) {
           if (measuredRace !== round) return;
           record.winner = sample.host; record.samples = [sample];
-          if (DeliveryPolicy.beatsCurrent(sample.elapsedMs, currentMs)) {
+          // The raced request is a contender too: finishing first means the current host won.
+          if (request.completedAt > raceStartedAt) { record.verdict = 'current-fastest'; decided(); }
+          else if (DeliveryPolicy.beatsCurrent(sample.elapsedMs, currentMs)) {
             const previousHost = session.activeEpoch === networkEpoch && session.activeHost || currentHost;
             const scope = keepHost || previousHost === sample.host ? 'fragment' : 'video';
             fragmentState(row, fragmentKey(request.originalUrl, request.range)).host = sample.host;
