@@ -243,7 +243,11 @@
             const change = { at: wallNow(), fromHost: currentHost, toHost: sample.host, scope, range: request.range };
             row.switches.push(change); log('switch', { ...change, id: request.id, reason: trigger });
             decided();
-            interceptor.syntheticTimeout(request.id);
+            // The player may have abandoned the raced attempt and retried the Range elsewhere.
+            const key = fragmentKey(request.originalUrl, request.range);
+            const attempt = [...videoRequests.values()].reverse().find(item => item.host !== sample.host
+              && fragmentKey(item.originalUrl, item.range) === key) || request;
+            interceptor.syntheticTimeout(attempt.id);
           } else { record.verdict = sample.elapsedMs >= currentMs ? 'current-fastest' : 'below-margin'; decided(); }
         }
       }).then(result => {

@@ -45,7 +45,7 @@
     const xhrPrototype = XHR?.prototype, original = { open: xhrPrototype?.open, send: xhrPrototype?.send, header: xhrPrototype?.setRequestHeader, abort: xhrPrototype?.abort };
     const transactions = new WeakMap(), live = new Set(), readers = new Set(), restores = [], pending = new Map();
     const earlyListeners = new WeakMap(), earlyReferences = new Set();
-    const seenFragments = new Set(), pendingSynthetic = new Map();
+    const syntheticRanges = new Set(), pendingSynthetic = new Map();
     const callbackProperties = ['onloadstart', 'onprogress', 'onabort', 'onerror', 'onload', 'ontimeout', 'onloadend', 'onreadystatechange'];
     let syntheticDisabled = false;
     let disposed = false, timingObserver = null, requiresReload = false, wrappedXHR = null;
@@ -210,7 +210,10 @@
     }
     function syntheticTimeout(id) {
       const tx = [...live].find(item => item.token?.id === id);
-      if (!active() || syntheticDisabled || !tx || tx.finished || !tx.firstAttempt || typeof tx.xhr.ontimeout !== 'function') return false;
+      // At most one per Range, on whichever attempt is in flight: the player may already have retried it.
+      if (!active() || syntheticDisabled || !tx || tx.finished || !tx.fragmentKey || syntheticRanges.has(tx.fragmentKey)
+        || typeof tx.xhr.ontimeout !== 'function') return false;
+      syntheticRanges.add(tx.fragmentKey);
       const xhr = tx.xhr, callbacks = Object.fromEntries(callbackProperties.map(name => [name, xhr[name]]));
       const checkpoint = { id, cid: tx.token.cid, range: tx.range, host: tx.token.host, at: now() };
       // Register before player callbacks: ontimeout can synchronously send its retry.
@@ -297,8 +300,6 @@
         tx.url = destination;
       }
       tx.fragmentKey = options.fragmentKey?.(tx.sourceUrl, tx.range) || null;
-      tx.firstAttempt = tx.fragmentKey !== null && !seenFragments.has(tx.fragmentKey);
-      if (tx.fragmentKey !== null) seenFragments.add(tx.fragmentKey);
       tx.sent = true; tx.startedAt = now(); tx.hiddenOverlap = !!scope.document?.hidden; tx.token = begin(tx.sourceUrl, tx.url, 'xhr', tx.method, tx.range);
       listen(tx, 'progress', event => { tx.bytes = Math.max(tx.bytes, Number(event.loaded) || 0); transfer(tx.token, { status: Number(tx.xhr.status) || 0, responseUrl: tx.xhr.responseURL || '', bytes: tx.bytes, outcome: 'progress', ...measured(tx, tx.bytes) }, 'progress'); });
       listen(tx, 'load', () => { if (transactions.get(tx.xhr) === tx && tx.xhr.readyState === 4) { tx.loaded = true; tx.prepare?.(); } });
