@@ -42,7 +42,7 @@ test('presentation and low buffer alone cannot start a route comparison without 
 });
 
 test('measured requests retry safely, disable unconfirmed synthetic timeouts and detect shortfall on send', async () => {
-  for (const scenario of ['player retries', 'player does not retry', 'shortfall on send', 'player retried before the winner']) {
+  for (const scenario of ['player retries', 'player does not retry', 'shortfall on send', 'player retried before the winner', 'player retry completed before the winner']) {
     const retries = scenario === 'player retries';
     const h = harness({ initial: preparing }); h.buffer(0); h.video.emit('loadedmetadata'); h.video.emit('seeking');
     assert.equal(h.pending.length, 0, 'startup metadata does not probe the candidate pool');
@@ -57,11 +57,19 @@ test('measured requests retry safely, disable unconfirmed synthetic timeouts and
       assert.equal(h.pending.length, 2, 'the next real send compares measured shortfall without waiting for a timer');
       h.close(); continue;
     }
-    if (scenario === 'player retried before the winner') {
+    if (scenario.startsWith('player retr')) {
       let third; const first = h.request(media(), 'bytes=0-1048575', () => {});
       h.advance(1000, { move: false }); await h.flush(); assert.equal(h.pending.length, 2);
       h.advance(1000, { move: false }); first.cancel();
-      h.request(media(B), 'bytes=0-1048575', () => { third = h.request(media(B)); });
+      const retry = h.request(media(B), 'bytes=0-1048575', () => { third = h.request(media(B)); });
+      if (scenario === 'player retry completed before the winner') {
+        h.advance(100, { move: false }); retry.progress(1048576); retry.complete(1048576);
+        h.advance(100, { move: false }); await h.deliver(h.pending[0]);
+        const session = h.kernel.getState().session;
+        assert.equal(session.lastRace.verdict, 'current-fastest'); assert.equal(session.switchCount, 0);
+        assert.equal(new URL(h.request(media(B), 'bytes=1048576-2097151').url).hostname, B);
+        h.close(); continue;
+      }
       h.advance(200, { move: false }); await h.deliver(h.pending[0]);
       assert.ok(third, 'the in-flight retry of the raced Range is moved to the winner');
       assert.equal(new URL(third.url).hostname, new URL(h.pending[0].url).hostname);
