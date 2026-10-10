@@ -13,6 +13,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const armNames = ['native', 'p0', 'bilismooth', 'upstream'];
 const defaultArms = ['native', 'p0', 'bilismooth'];
 const hostPolicy = require('../src/core/routing-policy.js').createPolicy({});
+// Bilibili's own saved quality preference; a fresh signed-in profile otherwise starts at 1080P.
+const qualityPreference = { '4k': '120', '1080p60': '116' };
 
 function options(argv) {
   const value = (name, fallback) => argv.find(item => item.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
@@ -310,7 +312,9 @@ function summarizeRun(run, rate = 1) {
 async function runOne(spec, opts, auth, extensions, ledger, persist) {
   const run = { ...spec, startedAt: new Date().toISOString(), phases: [], requests: [], dashRepresentations: [], networkBytes: 0,
     environment: { headed: true, viewport: { width: 2560, height: 1440 }, sound: 'muted', rate: opts.rate, occlusionBackgroundingDisabled: true,
-      freshProfile: true, extensionSettings: 'build-own-defaults', quality: 'account/site default; no selection, pause or seek',
+      freshProfile: true, extensionSettings: 'build-own-defaults',
+      quality: qualityPreference[spec.video.quality] ? `saved site preference CURRENT_QUALITY=${qualityPreference[spec.video.quality]}; no selection, pause or seek`
+        : 'account/site default; no selection, pause or seek',
       phases: spec.phases, observationSecondsAfterFirstFrame: opts.seconds,
       history: 'Startup uses a fresh profile. Immediate reload keeps that same profile, media cache and measured-routing history.' } };
   let context, page, phase, cdp, interval, closing, finalizeNetwork = () => {}, riskCheckRunning = false;
@@ -338,6 +342,8 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
     context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: false,
       viewport: { width: 2560, height: 1440 }, args });
     await context.addCookies(auth.cookies); await context.addInitScript(observe);
+    if (qualityPreference[spec.video.quality]) await context.addCookies([{ name: 'CURRENT_QUALITY', value: qualityPreference[spec.video.quality],
+      domain: '.bilibili.com', path: '/' }]);
     await context.addInitScript(rate => {
       window.__benchmarkVisibility = [{ at: 0, visibility: document.visibilityState }];
       document.addEventListener('visibilitychange', () => window.__benchmarkVisibility.push({ at: performance.now(), visibility: document.visibilityState }));
@@ -535,6 +541,7 @@ async function main(argv = process.argv.slice(2)) {
       '--resume: continue the identical schedule. It cannot clear a recorded stop or repeat a partial run.',
       'All labels in one output directory share budget.json. Existing --auth login is required.',
       'Runs use headed Chromium, muted audio, the requested rate and account/site-default quality. No premeasurement quality selection, pause or seek.' ,
+      'Rows registered as 4k or 1080p60 start with the site quality preference cookie CURRENT_QUALITY=120 or 116.',
       '--upstream=PATH remains supported when --arms includes upstream; its default version check remains v0.5.0.'
     ].join('\n'));
     return;
