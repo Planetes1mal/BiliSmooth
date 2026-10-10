@@ -308,7 +308,7 @@ function summarizeRun(run, rate = 1) {
 
 async function runOne(spec, opts, auth, extensions, ledger, persist) {
   const run = { ...spec, startedAt: new Date().toISOString(), phases: [], requests: [], dashRepresentations: [], networkBytes: 0,
-    environment: { headed: true, viewport: { width: 2560, height: 1440 }, sound: 'muted', rate: opts.rate,
+    environment: { headed: true, viewport: { width: 2560, height: 1440 }, sound: 'muted', rate: opts.rate, occlusionBackgroundingDisabled: true,
       freshProfile: true, extensionSettings: 'build-own-defaults', quality: 'account/site default; no selection, pause or seek',
       phases: spec.phases, observationSecondsAfterFirstFrame: opts.seconds,
       history: 'Startup uses a fresh profile. Immediate reload keeps that same profile, media cache and measured-routing history.' } };
@@ -328,7 +328,10 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
   try {
     const profile = await fs.mkdtemp(path.join(root, 'work', 'benchmark-profile-'));
     run.profile = path.relative(root, profile).replaceAll('\\', '/');
-    const args = ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--window-size=2560,1440'];
+    // A covered macOS window otherwise becomes hidden and voids samples. These flags change visibility
+    // and timer handling only, not networking or decoding.
+    const args = ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--window-size=2560,1440',
+      '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'];
     if (spec.arm === 'native') args.push('--disable-extensions');
     else args.push(`--disable-extensions-except=${extensions[spec.arm]}`, `--load-extension=${extensions[spec.arm]}`);
     context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: false,
