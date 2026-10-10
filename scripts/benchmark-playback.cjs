@@ -27,11 +27,13 @@ function options(argv) {
   const seconds = Number(value('seconds', mode === 'screen' ? 45 : 60)), pause = Number(value('pause', 15));
   if (!Number.isInteger(seconds) || seconds < (mode === 'measure' ? 60 : 15) || seconds > 180) throw Error('--seconds must be 60–180 for measure or 15–180 for screen');
   if (!Number.isInteger(pause) || pause < 10 || pause > 20) throw Error('--pause must be 10–20');
+  const rate = Number(value('rate', 1));
+  if (![1, 2].includes(rate)) throw Error('--rate must be 1 or 2');
   const label = value('label', mode);
   if (!/^[a-z0-9][a-z0-9_-]{0,79}$/i.test(label)) throw Error('Invalid --label');
   const outputPath = path.resolve(root, output);
   if (!outputPath.startsWith(path.join(root, 'outputs') + path.sep)) throw Error('--output must be inside outputs/');
-  return { mode, arms, videos: path.resolve(root, videos), output: outputPath, seconds, pause, label,
+  return { mode, arms, videos: path.resolve(root, videos), output: outputPath, seconds, pause, rate, label,
     p0: path.resolve(root, value('p0', 'work/measured-routing-p0-540fd04/extension')),
     upstream: value('upstream') ? path.resolve(root, value('upstream')) : null,
     startedAt: value('started-at'), deadline: value('deadline'), maxBytes: Number(value('max-bytes', 4 * 1024 ** 3)),
@@ -263,7 +265,7 @@ function qualityCoverage(run, required) {
   return frames.every(matches);
 }
 
-function summarizeRun(run) {
+function summarizeRun(run, rate = 1) {
   run.summary = summarize(run.samples);
   run.summary.firstFrameFromNavigationMs = run.firstFrameFromNavigationMs ?? run.summary.firstFrameFromNavigationMs;
   run.summary.mediaBytes = run.requests.filter(row => row.role === 'playback').reduce((sum, row) => sum + row.bytes, 0);
@@ -280,7 +282,7 @@ function summarizeRun(run) {
   }));
   const representations = run.dashRepresentations.filter(row => row.kind === 'video' &&
     run.requests.some(request => request.role === 'playback' && request.bytes > 0 && row.paths.includes(request.resourcePath)));
-  const correctQualityAndRate = sample => sample.media && Math.abs(sample.media.rate - 1) < 0.01 &&
+  const correctQualityAndRate = sample => sample.media && Math.abs(sample.media.rate - rate) < 0.01 &&
     representations.some(row => row.width === sample.media.width && row.height === sample.media.height);
   const active = sample => sample.media && sample.frames > 0 && !sample.media.paused && !sample.media.seeking && !sample.media.ended &&
     sample.visibility === 'visible' && sample.media.width > 0 && correctQualityAndRate(sample);
@@ -292,7 +294,7 @@ function summarizeRun(run) {
   const mismatchedSamples = run.samples.filter(sample => sample.visibility === 'visible' && sample.media?.width > 0 && !correctQualityAndRate(sample)).length;
   run.segmentContinuity = { valid: true, toleranceSeconds: 2, jumps: segmentJumps(run.samples) };
   run.segmentContinuity.valid = run.segmentContinuity.jumps.length === 0;
-  run.requestedConditions = { quality: 'site-default', rate: 1,
+  run.requestedConditions = { quality: 'site-default', rate,
     qualityVerified: run.samples.some(active), validFrameProgressMs: run.summary.validFrameProgressMs,
     mismatchedQualityOrRateSamples: mismatchedSamples,
     foregroundCoverage: run.samples.length ? run.summary.activeForegroundSamples / run.samples.length : 0,
@@ -306,7 +308,7 @@ function summarizeRun(run) {
 
 async function runOne(spec, opts, auth, extensions, ledger, persist) {
   const run = { ...spec, startedAt: new Date().toISOString(), phases: [], requests: [], dashRepresentations: [], networkBytes: 0,
-    environment: { headed: true, viewport: { width: 2560, height: 1440 }, sound: 'muted', rate: 1,
+    environment: { headed: true, viewport: { width: 2560, height: 1440 }, sound: 'muted', rate: opts.rate,
       freshProfile: true, extensionSettings: 'build-own-defaults', quality: 'account/site default; no selection, pause or seek',
       phases: spec.phases, observationSecondsAfterFirstFrame: opts.seconds,
       history: 'Startup uses a fresh profile. Immediate reload keeps that same profile, media cache and measured-routing history.' } };
@@ -332,12 +334,12 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
     context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: false,
       viewport: { width: 2560, height: 1440 }, args });
     await context.addCookies(auth.cookies); await context.addInitScript(observe);
-    await context.addInitScript(() => {
+    await context.addInitScript(rate => {
       window.__benchmarkVisibility = [{ at: 0, visibility: document.visibilityState }];
       document.addEventListener('visibilitychange', () => window.__benchmarkVisibility.push({ at: performance.now(), visibility: document.visibilityState }));
-      const mute = () => { for (const video of document.querySelectorAll('video')) { video.muted = true; video.playbackRate = 1; } };
+      const mute = () => { for (const video of document.querySelectorAll('video')) { video.muted = true; video.playbackRate = rate; } };
       new MutationObserver(mute).observe(document, { childList: true, subtree: true }); mute();
-    });
+    }, opts.rate);
     page = context.pages()[0] || await context.newPage(); await page.bringToFront();
     run.browserVersion = context.browser()?.version(); run.platform = process.platform;
     cdp = await context.newCDPSession(page); await cdp.send('Network.enable'); await cdp.send('Media.enable');
@@ -435,7 +437,7 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
           if (!phase.defaultSettingsVerified) throw Error(`${spec.arm} runtime preferences differ from that build's defaults`);
         }
         await Promise.race([Promise.allSettled([...pending]), delay(500)]);
-        finalizeNetwork(); phase.requests = structuredClone(run.requests.filter(row => row.phase === name)); summarizeRun(phase); Object.assign(phase.summary, measuredPhaseSummary(phase));
+        finalizeNetwork(); phase.requests = structuredClone(run.requests.filter(row => row.phase === name)); summarizeRun(phase, opts.rate); Object.assign(phase.summary, measuredPhaseSummary(phase));
         phase.observedCohorts = phase.siteMetadata ? cohort(phase.siteMetadata, Date.parse(phase.startedAt)) : [];
         phase.observedConditions = { codecAndBitrate: phase.requestedConditions.representations,
           dimensions: phase.summary.dimensions, rates: phase.summary.rates, firstObservedPlayhead: phase.samples.find(row => row.frames > 0)?.media?.currentTime,
@@ -521,12 +523,13 @@ async function main(argv = process.argv.slice(2)) {
       '--mode=screen: native only, one 45-second run per candidate; set is ignored.',
       '--mode=measure: at least 60 foreground seconds after first frame in each phase; --seconds=60..180 (default 60).',
       '--pause=15: seconds between runs; allowed range 10..20.',
+      '--rate=1: playback rate 1 or 2 from page start; one label carries one rate.',
       '--max-bytes=4294967296: default 4 GiB cumulative network budget; can only be reduced.',
       '--started-at=ISO --deadline=ISO: default deadline is three hours after the recorded start.',
       '--label=NAME: separate schedule within the output directory; defaults to the mode.',
       '--resume: continue the identical schedule. It cannot clear a recorded stop or repeat a partial run.',
       'All labels in one output directory share budget.json. Existing --auth login is required.',
-      'Runs use headed Chromium, muted audio, 1x and account/site-default quality. No premeasurement quality selection, pause or seek.' ,
+      'Runs use headed Chromium, muted audio, the requested rate and account/site-default quality. No premeasurement quality selection, pause or seek.' ,
       '--upstream=PATH remains supported when --arms includes upstream; its default version check remains v0.5.0.'
     ].join('\n'));
     return;
@@ -567,7 +570,7 @@ async function main(argv = process.argv.slice(2)) {
   const schedulePath = path.join(opts.output, `${opts.label}-schedule.json`);
   const runsPath = path.join(opts.output, `${opts.label}-runs`);
   const schedule = makeSchedule(videos, opts.arms, opts.mode);
-  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
+  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, rate: opts.rate, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
   let previous;
   try { previous = JSON.parse(await fs.readFile(schedulePath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (previous && !opts.resume) throw Error('Schedule exists; use --resume or another label');
