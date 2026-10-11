@@ -171,7 +171,8 @@
         const key = fragmentKey(request.originalUrl, request.range);
         if (key && !event.hiddenOverlap) {
           const failed = ['timeout', 'network-error', 'http-error'].includes(event.outcome)
-            || event.outcome === 'aborted' && !(event.bytes > 0) && event.elapsedMs >= C.NO_RESPONSE_MS
+            || event.outcome === 'aborted' && !event.complete && (request.representationKind === 'video' || !(event.bytes > 0))
+              && request.mediaGeneration === requestGeneration() && request.player === watchedVideo && event.elapsedMs >= C.NO_RESPONSE_MS
               && (playbackEvidence()?.startupPending || !watchedVideo?.seeking && !watchedVideo?.paused);
           if (failed) {
             fragmentState(retained(request.cid), key).failedHosts.add(event.host);

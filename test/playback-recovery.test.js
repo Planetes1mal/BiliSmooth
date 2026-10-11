@@ -143,3 +143,27 @@ test('late old requests and race results cannot move a new network, player or vi
     assert.equal(new URL(next.url).hostname, A, cause); h.close();
   }
 });
+
+test('recorded partial abort joins the prior failure without counting seek or replaced-media cancellation', async () => {
+  for (const cause of ['startup', 'playing', 'seek', 'pause', 'emptied', 'player replacement', 'network reset', 'short abort']) {
+    const h = harness({ initial: cause === 'startup' ? preparing : {}, rvfc: true });
+    if (cause !== 'startup') h.advance(1000, { frames: true });
+    h.buffer(40);
+    const first = h.request(); h.advance(3051.2, { frames: cause !== 'startup', move: false }); first.cancel();
+    const partial = h.request(media(), 'bytes=1048576-2097151');
+    h.advance(cause === 'short abort' ? 59.4 : 3587.3, { frames: cause !== 'startup', move: false });
+    partial.progress(cause === 'short abort' ? 3620 : 457449);
+    h.advance(cause === 'short abort' ? 18.8 : 462.6, { frames: cause !== 'startup', move: false });
+    if (cause === 'seek') { h.video.seeking = true; h.video.emit('seeking'); }
+    if (cause === 'pause') { h.video.paused = true; h.video.emit('pause'); }
+    if (cause === 'emptied') h.video.emit('emptied');
+    if (cause === 'player replacement') { h.replacePlayer(sharedEmitter({ ...h.video }, { event: true })); h.api.getState(); }
+    if (cause === 'network reset') h.api.resetNetwork();
+    partial.cancel();
+    h.video.seeking = false; h.video.paused = false;
+    h.request(media(), 'bytes=2097152-3145727');
+    assert.equal(h.pending.length, ['startup', 'playing'].includes(cause) ? 2 : 0, cause);
+    if (h.pending.length) assert.equal(h.kernel.getState().session.lastRace.trigger, 'errors', cause);
+    h.close();
+  }
+});
