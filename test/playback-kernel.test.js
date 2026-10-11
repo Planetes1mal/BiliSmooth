@@ -232,7 +232,7 @@ test('measured routing retains healthy fragments, bounds switching and preserves
   const manifest = (video = cid) => ({ dash: { video: ['30080', '30112'].map(id => ({ id: Number(id), bandwidth: 9000000,
     baseUrl: url(A, id, video), backupUrl: [B, C, D].map(host => url(host, id, video)) })),
     audio: [{ id: 30280, bandwidth: 128000, baseUrl: url(A, '30280', video), backupUrl: [B, C, D].map(host => url(host, '30280', video)) }] } });
-  for (const scenario of ['cooldown', 'no-switch cooldown', 'four-switch limit', 'healthy fragment', 'video retry', 'audio retry', 'missing runner-up']) {
+  for (const scenario of ['cooldown', 'no-switch cooldown', 'four-switch limit', 'healthy fragment', 'video retry', 'audio retry', 'missing runner-up', 'near-two-second abort']) {
     const pending = [], store = new Map();
     store.set('bilismooth.delivery-history.v1.' + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US', JSON.stringify({ version: 1,
       rows: settings.candidatePool.map(host => ({ host, meanBps: host === B ? 40000000 : host === C ? 30000000 : host === D ? 20000000 : 1000000,
@@ -282,7 +282,8 @@ test('measured routing retains healthy fragments, bounds switching and preserves
     } else {
       const xhr = open(); await h.advance(1000); const winner = await compare('manual', scenario !== 'missing runner-up'); xhr.cancel();
       const id = scenario === 'audio retry' ? '30280' : '30080', failed = open(url(A, id), range(5));
-      assert.equal(new URL(failed.url).hostname, winner, scenario); failed.expire();
+      assert.equal(new URL(failed.url).hostname, winner, scenario);
+      if (scenario === 'near-two-second abort') { await h.advance(1998.9); failed.cancel(); } else failed.expire();
       const retry = open(url(D, id), range(5)); assert.equal(new URL(retry.url).hostname, scenario === 'missing runner-up' ? D : C, scenario);
       if (scenario !== 'missing runner-up') {
         retry.expire(); h.kernel.setConfig({ mode: 'force' }); routed(D, range(5), id, D);

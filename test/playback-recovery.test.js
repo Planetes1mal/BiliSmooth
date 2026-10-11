@@ -149,7 +149,7 @@ test('recorded partial abort joins the prior failure without counting seek or re
     const h = harness({ initial: cause === 'startup' ? preparing : {}, rvfc: true });
     if (cause !== 'startup') h.advance(1000, { frames: true });
     h.buffer(40);
-    const first = h.request(); h.advance(3051.2, { frames: cause !== 'startup', move: false }); first.cancel();
+    const first = h.request(); h.advance(2051.1, { frames: cause !== 'startup', move: false }); first.cancel();
     const partial = h.request(media(), 'bytes=1048576-2097151');
     h.advance(cause === 'short abort' ? 59.4 : 3587.3, { frames: cause !== 'startup', move: false });
     partial.progress(cause === 'short abort' ? 3620 : 457449);
