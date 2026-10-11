@@ -39,7 +39,7 @@ function options(argv) {
     p0: path.resolve(root, value('p0', 'work/measured-routing-p0-540fd04/extension')),
     upstream: value('upstream') ? path.resolve(root, value('upstream')) : null,
     startedAt: value('started-at'), deadline: value('deadline'), maxBytes: Number(value('max-bytes', 4 * 1024 ** 3)),
-    resume: argv.includes('--resume'), reportedOnly: argv.includes('--reported-only') };
+    resume: argv.includes('--resume'), reportedOnly: argv.includes('--reported-only'), firstOpenOnly: argv.includes('--first-open-only') };
 }
 
 function normalizeVideos(input, mode, at = Date.now(), reportedOnly = false) {
@@ -63,10 +63,10 @@ function normalizeVideos(input, mode, at = Date.now(), reportedOnly = false) {
   });
 }
 
-function makeSchedule(videos, arms, mode) {
+function makeSchedule(videos, arms, mode, firstOpenOnly = false) {
   return videos.flatMap((video, index) => {
     const offset = index % arms.length, order = [...arms.slice(offset), ...arms.slice(0, offset)];
-    return order.map(arm => ({ id: `${video.id}-${arm}`, video, arm, phases: mode === 'screen' ? ['startup'] : ['startup', 'reload'] }));
+    return order.map(arm => ({ id: `${video.id}-${arm}`, video, arm, phases: mode === 'screen' || firstOpenOnly ? ['startup'] : ['startup', 'reload'] }));
   });
 }
 
@@ -500,7 +500,8 @@ function summarizeGroups(results) {
 
 function summarizeComparisons(results, arms) {
   const videos = [...new Set(results.map(run => run.video.id))];
-  return videos.flatMap(video => ['startup', 'reload'].map(name => {
+  const phases = [...new Set(results.flatMap(run => (run.summary || []).map(phase => phase.phase)))];
+  return videos.flatMap(video => phases.map(name => {
     const observations = arms.map(arm => {
       const run = results.find(row => row.video.id === video && row.arm === arm);
       const phase = run?.summary?.find(row => row.phase === name);
@@ -534,6 +535,7 @@ async function main(argv = process.argv.slice(2)) {
       '--mode=measure: at least 60 foreground seconds after first frame in each phase; --seconds=60..180 (default 60).',
       '--pause=15: seconds between runs; allowed range 10..20.',
       '--rate=1: playback rate 1 or 2 from page start; one label carries one rate.',
+      '--first-open-only: skip reload; observe only the first navigation in each fresh profile.',
       '--max-bytes=4294967296: default 4 GiB cumulative network budget; can only be reduced.',
       '--started-at=ISO --deadline=ISO: default deadline is three hours after the recorded start.',
       '--label=NAME: separate schedule within the output directory; defaults to the mode.',
@@ -581,7 +583,7 @@ async function main(argv = process.argv.slice(2)) {
   }
   const schedulePath = path.join(opts.output, `${opts.label}-schedule.json`);
   const runsPath = path.join(opts.output, `${opts.label}-runs`);
-  const schedule = makeSchedule(videos, opts.arms, opts.mode);
+  const schedule = makeSchedule(videos, opts.arms, opts.mode, opts.firstOpenOnly);
   const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, rate: opts.rate, reportedOnly: opts.reportedOnly, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
   let previous;
   try { previous = JSON.parse(await fs.readFile(schedulePath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
