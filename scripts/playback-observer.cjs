@@ -5,7 +5,7 @@ function observe() {
   const connection = navigator.connection;
   const readConnection = () => connection ? { type: connection.type || null, effectiveType: connection.effectiveType || null,
     downlink: connection.downlink, rtt: connection.rtt, saveData: connection.saveData } : null;
-  const state = window.__biliObservation = { events: [], videos: 0, firstPrimaryFrameAt: null,
+  const state = window.__biliObservation = { events: [], videos: 0, firstPrimaryFrameAt: null, firstPrimaryFrameMediaTime: null,
     timeOrigin: performance.timeOrigin, initialConnection: readConnection(), connectionEvents: [] };
   connection?.addEventListener('change', () => state.connectionEvents.push({ at: performance.now(), ...readConnection() }));
   const watched = new WeakMap();
@@ -24,7 +24,9 @@ function observe() {
         frames.frames++; frames.lastFrameAt = performance.now(); frames.lastFrameMediaTime = metadata.mediaTime;
         if (frames.firstFrameAt === null) frames.firstFrameAt = performance.now();
         if (state.firstPrimaryFrameAt === null && video === [...document.querySelectorAll('video')]
-          .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0]) state.firstPrimaryFrameAt = performance.now();
+          .sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0]) {
+          state.firstPrimaryFrameAt = performance.now(); state.firstPrimaryFrameMediaTime = metadata.mediaTime;
+        }
         video.requestVideoFrameCallback(frame);
       }
       video.requestVideoFrameCallback(frame);

@@ -15,6 +15,8 @@ const defaultArms = ['native', 'p0', 'bilismooth'];
 const hostPolicy = require('../src/core/routing-policy.js').createPolicy({});
 // Bilibili's own saved quality preference; a fresh signed-in profile otherwise starts at 1080P.
 const qualityPreference = { '4k': '120', '1080p60': '116' };
+// A literal zero resumes server history; 1 ms selects the opening frame through the site's own URL handling.
+const startPosition = { method: 'Bilibili URL parameter', parameter: 't', seconds: 0.001 };
 
 async function benchmarkWindow() {
   const browser = await chromium.launch({ channel: 'chromium', headless: false,
@@ -324,7 +326,7 @@ function summarizeRun(run, rate = 1) {
 async function runOne(spec, opts, auth, extensions, ledger, persist) {
   const run = { ...spec, startedAt: new Date().toISOString(), phases: [], requests: [], dashRepresentations: [], networkBytes: 0,
     environment: { headed: true, window: opts.window, sound: 'muted', rate: opts.rate, occlusionBackgroundingDisabled: true,
-      freshProfile: true, extensionSettings: 'build-own-defaults',
+      freshProfile: true, extensionSettings: 'build-own-defaults', startPosition,
       quality: qualityPreference[spec.video.quality] ? `saved site preference CURRENT_QUALITY=${qualityPreference[spec.video.quality]}; no selection, pause or seek`
         : 'account/site default; no selection, pause or seek',
       phases: spec.phases, observationSecondsAfterFirstFrame: opts.seconds,
@@ -422,9 +424,10 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
         pending.add(reading); reading.finally(() => pending.delete(reading));
       };
       page.on('response', onResponse);
+      const navigationUrl = new URL(spec.video.url); navigationUrl.searchParams.set(startPosition.parameter, String(startPosition.seconds));
       const navigation = name === 'reload'
         ? await page.reload({ waitUntil: 'domcontentloaded', timeout: 25000 })
-        : await page.goto(spec.video.url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        : await page.goto(navigationUrl.href, { waitUntil: 'domcontentloaded', timeout: 25000 });
       phase.navigationStatus = navigation?.status();
       if (phase.navigationStatus >= 400 && !ledger.stop) { phase.status = 'unavailable-video'; page.off('response', onResponse); break; }
       const target = new URL(page.url());
@@ -442,10 +445,12 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
       while (Date.now() < phaseDeadline && !ledger.stop) {
         const sample = await page.evaluate(snapshot); phase.samples.push(sample);
         const observed = await page.evaluate(() => ({ firstFrame: window.__biliObservation.firstPrimaryFrameAt,
+          firstFrameMediaTime: window.__biliObservation.firstPrimaryFrameMediaTime,
           events: window.__biliObservation.events, visibility: window.__benchmarkVisibility,
           video: window.__INITIAL_STATE__?.videoData ? { viewCount: window.__INITIAL_STATE__.videoData.stat?.view,
             publishedAt: Number.isFinite(window.__INITIAL_STATE__.videoData.pubdate) ? new Date(window.__INITIAL_STATE__.videoData.pubdate * 1000).toISOString() : null } : null }));
-        phase.firstFrameFromNavigationMs = observed.firstFrame; phase.events = observed.events; phase.visibility = observed.visibility;
+        phase.firstFrameFromNavigationMs = observed.firstFrame; phase.firstFrameMediaTime = observed.firstFrameMediaTime;
+        phase.events = observed.events; phase.visibility = observed.visibility;
         if (observed.video) phase.siteMetadata = observed.video;
         if (!phase.dashRepresentations.length) { const payload = await page.evaluate(() => window.__playinfo__ || null); recordDash(phase, payload); recordDash(run, payload); }
         if (sample.media?.error) { phase.status = 'failed-media'; break; }
@@ -465,6 +470,7 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
         phase.observedCohorts = phase.siteMetadata ? cohort(phase.siteMetadata, Date.parse(phase.startedAt)) : [];
         phase.observedConditions = { codecAndBitrate: phase.requestedConditions.representations,
           dimensions: phase.summary.dimensions, rates: phase.summary.rates, firstObservedPlayhead: phase.samples.find(row => row.frames > 0)?.media?.currentTime,
+          firstFrameMediaTime: phase.firstFrameMediaTime, startPosition,
           requiredQuality: spec.video.quality, coverageMet: qualityCoverage(phase, spec.video.quality) };
         if (opts.mode === 'measure' && (!phase.summary.firstFrameEligible || phase.summary.foregroundAfterFirstFrameMs < POST_FIRST_FRAME_MS || spec.video.set !== 'reference' && !phase.observedCohorts.includes(spec.video.set) || !phase.observedConditions.coverageMet))
           phase.status = 'incomplete-playback-observation';
@@ -527,7 +533,7 @@ function summarizeComparisons(results, arms) {
       qualities: [...new Set(row.representations.map(rep => rep.quality))].sort() });
     return { video, phase: name, observations,
       sameObservedQualityAndRate: observations.every(row => row.status === 'observed') && observations.every(row => signature(row) === signature(observations[0])),
-      limitation: 'Account-default playback may start at different restored positions or adapt quality. Compare only matching observed conditions; no pause, seek or quality correction was injected.' };
+      limitation: 'The site URL requests the opening frame at 1 ms to override restored history. Verify actual first-frame media time and compare only matching observed quality and rate; no harness seek is injected.' };
   }));
 }
 
@@ -558,6 +564,7 @@ async function main(argv = process.argv.slice(2)) {
       'All labels in one output directory share budget.json. Existing --auth login is required.',
       'Runs use headed Chromium, muted audio, the requested rate and account/site-default quality. No premeasurement quality selection, pause or seek.' ,
       'Rows registered as 4k or 1080p60 start with the site quality preference cookie CURRENT_QUALITY=120 or 116.',
+      'Every navigation requests t=0.001 (1 ms); literal t=0 does not override account history. Actual first-frame media time is recorded.',
       '--upstream=PATH remains supported when --arms includes upstream; its default version check remains v0.5.0.'
     ].join('\n'));
     return;
@@ -599,7 +606,7 @@ async function main(argv = process.argv.slice(2)) {
   const runsPath = path.join(opts.output, `${opts.label}-runs`);
   const schedule = makeSchedule(videos, opts.arms, opts.mode, opts.firstOpenOnly);
   opts.window = await benchmarkWindow();
-  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, rate: opts.rate, reportedOnly: opts.reportedOnly, window: opts.window, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
+  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, rate: opts.rate, reportedOnly: opts.reportedOnly, window: opts.window, startPosition, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
   let previous;
   try { previous = JSON.parse(await fs.readFile(schedulePath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (previous && !opts.resume) throw Error('Schedule exists; use --resume or another label');
