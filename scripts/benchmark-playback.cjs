@@ -16,6 +16,18 @@ const hostPolicy = require('../src/core/routing-policy.js').createPolicy({});
 // Bilibili's own saved quality preference; a fresh signed-in profile otherwise starts at 1080P.
 const qualityPreference = { '4k': '120', '1080p60': '116' };
 
+async function benchmarkWindow() {
+  const browser = await chromium.launch({ channel: 'chromium', headless: false,
+    args: ['--window-position=0,0', '--window-size=800,600'] });
+  try {
+    const page = await browser.newPage({ viewport: null });
+    const display = await page.evaluate(() => ({ width: screen.availWidth, height: screen.availHeight,
+      left: screen.availLeft, top: screen.availTop }));
+    return { display, width: Math.min(1280, display.width - 80), height: Math.min(800, display.height - 80),
+      left: display.left + 40, top: display.top + 40 };
+  } finally { await browser.close(); }
+}
+
 function options(argv) {
   const value = (name, fallback) => argv.find(item => item.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
   if (argv.includes('--help')) return { help: true };
@@ -311,7 +323,7 @@ function summarizeRun(run, rate = 1) {
 
 async function runOne(spec, opts, auth, extensions, ledger, persist) {
   const run = { ...spec, startedAt: new Date().toISOString(), phases: [], requests: [], dashRepresentations: [], networkBytes: 0,
-    environment: { headed: true, viewport: { width: 2560, height: 1440 }, sound: 'muted', rate: opts.rate, occlusionBackgroundingDisabled: true,
+    environment: { headed: true, window: opts.window, sound: 'muted', rate: opts.rate, occlusionBackgroundingDisabled: true,
       freshProfile: true, extensionSettings: 'build-own-defaults',
       quality: qualityPreference[spec.video.quality] ? `saved site preference CURRENT_QUALITY=${qualityPreference[spec.video.quality]}; no selection, pause or seek`
         : 'account/site default; no selection, pause or seek',
@@ -335,12 +347,13 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
     run.profile = path.relative(root, profile).replaceAll('\\', '/');
     // A covered macOS window otherwise becomes hidden and voids samples. These flags change visibility
     // and timer handling only, not networking or decoding.
-    const args = ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking', '--window-size=2560,1440',
+    const args = ['--autoplay-policy=no-user-gesture-required', '--disable-background-networking',
+      `--window-size=${opts.window.width},${opts.window.height}`, `--window-position=${opts.window.left},${opts.window.top}`,
       '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'];
     if (spec.arm === 'native') args.push('--disable-extensions');
     else args.push(`--disable-extensions-except=${extensions[spec.arm]}`, `--load-extension=${extensions[spec.arm]}`);
     context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: false,
-      viewport: { width: 2560, height: 1440 }, args });
+      viewport: null, args });
     await context.addCookies(auth.cookies); await context.addInitScript(observe);
     if (qualityPreference[spec.video.quality]) await context.addCookies([{ name: 'CURRENT_QUALITY', value: qualityPreference[spec.video.quality],
       domain: '.bilibili.com', path: '/' }]);
@@ -351,6 +364,7 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
       new MutationObserver(mute).observe(document, { childList: true, subtree: true }); mute();
     }, opts.rate);
     page = context.pages()[0] || await context.newPage(); await page.bringToFront();
+    run.environment.viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
     run.browserVersion = context.browser()?.version(); run.platform = process.platform;
     cdp = await context.newCDPSession(page); await cdp.send('Network.enable'); await cdp.send('Media.enable');
     finalizeNetwork = createNetworkTracker(cdp, run, stop, addBytes);
@@ -584,7 +598,8 @@ async function main(argv = process.argv.slice(2)) {
   const schedulePath = path.join(opts.output, `${opts.label}-schedule.json`);
   const runsPath = path.join(opts.output, `${opts.label}-runs`);
   const schedule = makeSchedule(videos, opts.arms, opts.mode, opts.firstOpenOnly);
-  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, rate: opts.rate, reportedOnly: opts.reportedOnly, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
+  opts.window = await benchmarkWindow();
+  const settings = { mode: opts.mode, arms: opts.arms, seconds: opts.seconds, pause: opts.pause, rate: opts.rate, reportedOnly: opts.reportedOnly, window: opts.window, builds: Object.fromEntries(await Promise.all(Object.entries(extensions).map(async ([arm,directory]) => [arm,{directory,manifestSha256:hash(await fs.readFile(path.join(directory,'manifest.json'))),bundleSha256:hash(await fs.readFile(path.join(directory,arm==='upstream'?'bili-accelerator.page.js':'playback.js')))}]))), schedule };
   let previous;
   try { previous = JSON.parse(await fs.readFile(schedulePath, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (previous && !opts.resume) throw Error('Schedule exists; use --resume or another label');
@@ -631,6 +646,6 @@ async function main(argv = process.argv.slice(2)) {
   if (report.status !== 'complete') process.exitCode = 2;
 }
 
-module.exports = { options, normalizeVideos, makeSchedule, rangeLength, isProbe, createNetworkTracker, recordDash, summarizeRun,
+module.exports = { options, benchmarkWindow, normalizeVideos, makeSchedule, rangeLength, isProbe, createNetworkTracker, recordDash, summarizeRun,
   summarizeGroups, summarizeComparisons, cohort, hiddenIntervals, foregroundDuration, measuredPhaseSummary, qualityCoverage, matchesDefaultRuntime, segmentJumps };
 if (require.main === module) main().catch(error => { console.error(redactReportUrls(String(error))); process.exitCode = 1; });
