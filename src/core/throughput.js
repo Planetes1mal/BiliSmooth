@@ -1,4 +1,4 @@
-/* Completed foreground video XHR measurements. Rates include first-byte waiting. */
+/* Foreground video XHR measurements, including unfinished delivery and first-byte waiting. */
 (function (scope) {
   'use strict';
   const Policy = scope.BiliSmoothDeliveryPolicy || (typeof require === 'function' ? require('./delivery-policy.js') : null);
@@ -21,7 +21,7 @@
   function create() {
     const hosts = new Map();
     function record(sample) {
-      if (sample.kind !== 'video' || sample.transport !== 'xhr' || sample.outcome !== 'complete'
+      if (sample.kind !== 'video' || sample.transport !== 'xhr' || !['complete', 'incomplete'].includes(sample.outcome)
         || sample.hidden || sample.bytes < C.THROUGHPUT_SAMPLE_MIN_BYTES || sample.elapsedMs <= 0) return false;
       let row = hosts.get(sample.host);
       if (!row) {

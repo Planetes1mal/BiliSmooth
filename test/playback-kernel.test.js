@@ -291,3 +291,28 @@ test('measured routing retains healthy fragments, bounds switching and preserves
     h.kernel.destroy();
   }
 });
+
+test('recorded burst-and-stall fragments constrain the current host race estimate', async () => {
+  const akamai = 'upos-hz-mirrorakam.akamaized.net', pending = [];
+  const issued = media(akamai).replace('video.m4s', '42573040983-1-30112.m4s');
+  const h = harness({ fetch: (url, init) => new Promise(resolve => pending.push({ url, init, resolve })) });
+  h.scope.__playinfo__ = { dash: { video: [{ id: 112, bandwidth: 3898599, baseUrl: issued, backupUrl: [issued.replace(akamai, A)] }] } };
+  let offset = 0;
+  for (const [bytes, elapsed, complete] of [[2763619, 886, true], [1276174, 1278.9, true], [952787, 2253.9, true],
+    [239394, 5002.6, false], [755784, 5276.4, false], [961646, 5275.9, false], [1338478, 5276.1, false], [3649985, 2741, true]]) {
+    const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', issued); xhr.setRequestHeader('Range', `bytes=${offset}-${offset + 4194303}`); xhr.send();
+    await h.advance(elapsed); xhr.progress(bytes); if (complete) xhr.complete(bytes); else xhr.expire(bytes);
+    offset += 4194304;
+  }
+  const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', issued); xhr.setRequestHeader('Range', 'bytes=127298111-130175184'); xhr.send();
+  await h.advance(1679.5); xhr.progress(1806801);
+  assert.equal(h.kernel.testRoutes({ trigger: 'errors' }), true);
+  const measured = h.kernel.getState().session;
+  assert.ok(Math.abs(measured.hosts[0].recentBps - 4977822.903543) < 0.01);
+  assert.ok(Math.abs(measured.lastRace.currentMs - 1263.897114) < 0.01);
+  await h.advance(1881.5);
+  pending[0].resolve({ status: 206, body: { getReader: () => ({ read: async () => ({ done: false, value: new Uint8Array(786432) }) }) } });
+  await h.flush();
+  assert.equal(h.kernel.getState().session.lastRace.verdict, 'current-fastest');
+  h.kernel.destroy();
+});

@@ -209,13 +209,15 @@
         .map(host => ({ host, url: delivery.addressForHost(request.originalUrl, host) })).filter(target => target.url);
       const targets = history.challengers(candidates.map(target => target.host)).map(host => candidates.find(target => target.host === host));
       if (!targets.length) return false;
-      const sustained = measurements.get(session.cid)?.snapshot().find(row => row.host === currentHost)?.goodputBps || 0;
+      const measured = measurements.get(session.cid)?.snapshot().find(row => row.host === currentHost);
+      const sustained = measured?.goodputBps ? Math.min(measured.goodputBps, measured.recentBps) : 0;
       row.failures = row.failures.filter(failure => at - failure.at <= C.ERROR_WINDOW_MS);
       const requiredBps = session.requiredBps * (watchedVideo?.playbackRate || 1);
       const keepHost = trigger === 'stuck' && requiredBps > 0 && sustained >= requiredBps * C.SHORTFALL_RATE_FACTOR
         && !row.failures.some(failure => failure.host === currentHost);
       if (trigger === 'stuck') noteHostFailure(request, currentHost);
-      const rate = request.bytes * 8000 / ((request.completedAt || now()) - request.startedAt) || (request.completedAt ? sustained : 0);
+      const currentRate = request.bytes * 8000 / ((request.completedAt || now()) - request.startedAt) || (request.completedAt ? sustained : 0);
+      const rate = Math.min(currentRate, measured?.recentBps ?? Infinity);
       const currentMs = rate > 0 ? (end - start + 1) * 8000 / rate : Infinity;
       const record = { at, networkEpoch, currentHost, requestId: request.id, trigger, range: `bytes=${start}-${end}`, contenders: targets.map(target => target.host),
         currentMs: Number.isFinite(currentMs) ? currentMs : null, verdict: null, winner: null, runnerUp: null, samples: [], switched: false };
