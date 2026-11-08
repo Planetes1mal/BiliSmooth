@@ -9,9 +9,9 @@ Switch CDN routes for Bilibili videos and see download speed and buffered time b
 
 [Download](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [Changelog](./CHANGELOG.md) · [Report an issue](https://github.com/Planetes1mal/BiliSmooth/issues)
 
-https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
+https://github.com/user-attachments/assets/1762be9f-cad5-4ae4-a497-8712c9d600e6
 
-*Interface shown with a demo video.*
+*Footage: Spring © Blender Foundation | [cloud.blender.org/spring](https://cloud.blender.org/spring), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).*
 
 ## Features
 
