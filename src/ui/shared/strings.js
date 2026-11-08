@@ -67,7 +67,7 @@ export const strings = Object.freeze({
   loadFailed: ['仪表盘没有加载完整，请刷新这个页面。', 'The dashboard did not load fully. Refresh this page.'],
 
   // Overview
-  switchesThisVideo: ['本视频换线', 'Switches this video'], recoveredCount: ['卡顿恢复 {n} 次', '{n} stalls recovered'], recoveredOne: ['卡顿恢复 1 次', '1 stall recovered'],
+  switchesThisVideo: ['本视频换线', 'Switches this video'],
   recent: ['最近记录', 'Recent activity'], seeAll: ['查看全部', 'See all'], allServers: ['全部线路', 'All servers'], ceiling: ['{n} MB/s', '{n} MB/s'],
 
   // Settings
@@ -85,7 +85,7 @@ export const strings = Object.freeze({
   restoreQuestion: ['恢复默认设置？', 'Restore defaults?'], restore: ['恢复', 'Restore'], cancel: ['取消', 'Cancel'], restored: ['已恢复默认设置', 'Defaults restored'],
 
   // Log
-  firstFrame: ['首帧用时', 'Time to first frame'], stalls: ['卡顿', 'Stalls'], recovered: ['已恢复', 'Recovered'], switches: ['换线', 'Switches'],
+  stalls: ['卡顿', 'Stalls'], recovered: ['已恢复', 'Recovered'], switches: ['换线', 'Switches'],
   filterAll: ['全部', 'All'], filterPlayback: ['播放', 'Playback'], filterServers: ['线路', 'Servers'], filterProblems: ['异常', 'Problems'],
   exportDiagnostics: ['导出诊断', 'Export diagnostics'], exported: ['已导出诊断文件', 'Diagnostics exported'], clear: ['清空', 'Clear'],
   clearQuestion: ['清空记录？', 'Clear the log?'], clearDetail: ['清空后无法恢复。已经导出的诊断文件不受影响。', 'This cannot be undone. Diagnostics you exported are not affected.'], logCleared: ['已清空记录', 'Log cleared'],

@@ -118,7 +118,7 @@ test('unknown values read as — and untested servers stay untested', async t =>
   assert.deepEqual(await page.locator('.hostrows .speed').allTextContents(), ['未测速', '未测速', '未测速']);
   assert.deepEqual(await page.locator('.hostrows .ttfb').allTextContents(), ['—', '—', '—']);
   await page.locator('.nav a[data-page="logs"]').click();
-  assert.deepEqual((await page.locator('.stats strong').allTextContents()).map(value => value.trim()), ['—', '—', '—', '—']);
+  assert.deepEqual((await page.locator('.stats strong').allTextContents()).map(value => value.trim()), ['—', '—', '—']);
 });
 
 test('theme, accent and language apply at once and are saved', async t => {

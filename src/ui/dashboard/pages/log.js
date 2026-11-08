@@ -12,7 +12,8 @@ export function createLog(section, app) {
   const kept = h('span.aside.muted');
   head.append(kept);
   const stat = key => h('div', h('span', { 'data-t': key }), h('strong'));
-  const firstFrame = stat('firstFrame'), stalls = stat('stalls'), recovered = stat('recovered'), switches = stat('switches');
+  // The log covers the page session, and so do its numbers.
+  const stalls = stat('stalls'), recovered = stat('recovered'), switches = stat('switches');
   let filter = 'all';
   const filters = segmented([['all', 'filterAll'], ['playback', 'filterPlayback'], ['servers', 'filterServers'], ['problems', 'filterProblems']],
     value => { filter = value; reset(); app.render(); }, 'log');
@@ -22,7 +23,7 @@ export function createLog(section, app) {
   const viewport = h('div.rows', { role: 'list', tabindex: '0', 'data-t-label': 'log' });
   const follow = h('button.btn.tonal', { type: 'button', onclick: showLatest });
   const empty = h('div.emptybox', { hidden: true, html: icon('log') }, h('b', { 'data-t': 'noRecords' }));
-  stack.append(h('section.card.stats', firstFrame, stalls, recovered, switches),
+  stack.append(h('section.card.stats', stalls, recovered, switches),
     h('div.logtools', filters.node, h('span.grow'), exportButton, clear),
     h('section.card.loglist', viewport, empty, h('div.follow', follow)));
   filters.set('all');
@@ -55,12 +56,10 @@ export function createLog(section, app) {
   function render() {
     const { t, view, connected } = app;
     text(kept, t('keepsLatest', { n: LIMIT }));
-    const startup = connected ? view.startup : null, ms = startup?.playinfoToFirstFrameMs;
-    figure(firstFrame.querySelector('strong'), Number.isFinite(ms) ? (ms / 1000).toFixed(2) : null, t('seconds'));
     const unit = unitOf(t), counters = connected ? view.counters : null;
     figure(stalls.querySelector('strong'), Number.isFinite(counters?.stalls) ? counters.stalls : null, unit);
     figure(recovered.querySelector('strong'), Number.isFinite(counters?.recoveries) ? counters.recoveries : null, unit);
-    figure(switches.querySelector('strong'), connected && Array.isArray(view.session?.switches) ? view.session.switches.length : null, unit);
+    figure(switches.querySelector('strong'), Number.isFinite(counters?.switches) ? counters.switches : null, unit);
     exportButton.disabled = !connected || app.busy('export');
     clear.disabled = !connected || app.busy('clear');
 

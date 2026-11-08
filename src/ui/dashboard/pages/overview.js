@@ -15,7 +15,7 @@ export function createOverview(stack, app) {
   const T = key => h('span', { 'data-t': key });
   const banner = h('section.card.status', h('span.glyph'), h('div', h('b'), h('small')));
   const kpi = (key, extra = []) => h('section.card.kpi', h('span.lbl', T(key)), h('strong'), ...extra);
-  const speed = kpi('speed'), buffered = kpi('buffered'), switches = kpi('switchesThisVideo', [h('span.sub')]);
+  const speed = kpi('speed'), buffered = kpi('buffered'), switches = kpi('switchesThisVideo');
   const server = h('button.card.kpi.link', { type: 'button', onclick: () => app.go('routes') }, h('span.lbl', T('currentServer'), h('span', { html: icon('right') })), h('strong'), h('span.sub'));
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'chart big'); svg.setAttribute('aria-hidden', 'true');
@@ -57,9 +57,6 @@ export function createOverview(stack, app) {
     text(sub, connected ? t(modeKey(config)) : ''); show(sub, connected);
     const session = connected ? view.session : null, count = Array.isArray(session?.switches) ? session.switches.length : null;
     figure(switches.querySelector('strong'), count, unitOf(t));
-    const recovered = connected ? view.counters?.recoveries : null;
-    const recoveredText = switches.querySelector('.sub');
-    text(recoveredText, Number.isFinite(recovered) ? t(recovered === 1 ? 'recoveredOne' : 'recoveredCount', { n: recovered }) : ''); show(recoveredText, Number.isFinite(recovered));
     if (!live) return;
 
     chart.update(series(view.speedSamples));
