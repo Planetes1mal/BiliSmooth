@@ -18,9 +18,10 @@ if (target.origin !== 'https://www.bilibili.com' || target.username || target.pa
   throw Error('--url must be a public https://www.bilibili.com/video/BV.../ or /video/av.../ page');
 target.hash = '';
 const hosts = [...new Set((option('hosts') || settings.candidatePool.join(',')).split(',').map(host => host.trim().toLowerCase()))];
-const isUpOsHost = host => /^upos-[a-z0-9-]+\.(?:bilivideo\.(?:com|cn|net)|akamaized\.net)$/.test(host);
+// The hosts a user may choose (upos and bcache under bilivideo), plus upos hosts on Akamai.
+const isUpOsHost = host => settings.isCdnHost(host) || /^upos-[a-z0-9-]+\.akamaized\.net$/.test(host);
 if (!hosts.length || hosts.length > 20 || hosts.some(host => !isUpOsHost(host)))
-  throw Error('--hosts must contain 1–20 upos CDN hostnames');
+  throw Error('--hosts must contain 1–20 upos or bcache CDN hostnames');
 const offsetMode = option('offset') || 'start';
 if (!['start', 'random'].includes(offsetMode)) throw Error('--offset must be start or random');
 const rounds = Number(option('rounds') || 2), maxBytes = Number(option('bytes') || (offsetMode === 'random' ? 786432 : 2097152)), timeoutMs = 6000;
