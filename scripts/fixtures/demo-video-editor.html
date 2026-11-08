@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <title>BiliSmooth demo video renderer</title>
 <style>
-  html, body { margin: 0; background: #e4ece6; }
+  html, body { margin: 0; background: #eef1f6; }
   canvas { display: block; width: 100vw; height: auto; }
 </style>
 <canvas id="output"></canvas>
@@ -11,184 +11,170 @@
   const canvas = document.querySelector('#output');
   const ctx = canvas.getContext('2d', { alpha: false });
   const FPS = 60;
+  const FONT = '"PingFang SC", -apple-system, "Helvetica Neue", Arial, sans-serif';
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const ease = t => t * t * t * (t * (t * 6 - 15) + 10);
 
   function interpolate(points, time, defaults) {
     if (!points.length) return defaults;
     if (time <= points[0].time) return { ...defaults, ...points[0] };
-    let next = points.findIndex(point => point.time > time);
+    const next = points.findIndex(point => point.time > time);
     if (next < 0) return { ...defaults, ...points.at(-1) };
     const from = { ...defaults, ...points[next - 1] };
     const to = { ...defaults, ...points[next] };
     const progress = ease(clamp((time - from.time) / (to.time - from.time), 0, 1));
-    return Object.fromEntries(Object.keys(defaults).map(key =>
-      [key, from[key] + (to[key] - from[key]) * progress]));
+    return Object.fromEntries(Object.keys(defaults).map(key => [key, from[key] + (to[key] - from[key]) * progress]));
   }
+  const loadVideo = url => new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.muted = true; video.playsInline = true; video.preload = 'auto';
+    video.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;pointer-events:none';
+    document.body.append(video);
+    video.addEventListener('loadeddata', async () => {
+      // Decode the first frame, then wait paused at zero until the clip's moment comes.
+      const first = new Promise(done => video.requestVideoFrameCallback(done));
+      await video.play(); await first; video.pause();
+      resolve(video);
+    }, { once: true });
+    video.addEventListener('error', () => reject(new Error('Cannot load ' + url)), { once: true });
+    video.src = url;
+  });
+  const loadImage = url => new Promise((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = url; });
 
-  // Coordinates belong to the unscaled source. The frame and its shadow stay
-  // fixed while the camera moves inside it, as in a screen-recording editor.
-  function createScene(video, timeline, width, height) {
-    const sourceWidth = video.videoWidth;
-    const sourceHeight = video.videoHeight;
-    const fit = Math.min(width * (8 / 9) / sourceWidth, height * (8 / 9) / sourceHeight);
-    const frame = {
-      width: sourceWidth * fit,
-      height: sourceHeight * fit,
-      radius: width / 90
-    };
+  // The recordings sit in a fixed frame; the camera moves inside it. Below the frame: one caption per scene and the
+  // footage credit. Coordinates in the timeline belong to the unscaled 1280 × 800 tab.
+  function createScene({ videos, offsets, timeline, brand, width, height }) {
+    const sourceWidth = 1280, sourceHeight = 800;
+    const frame = { width: width * 1200 / 1440, height: width * 1200 / 1440 * sourceHeight / sourceWidth, radius: width / 90 };
     frame.x = (width - frame.width) / 2;
-    frame.y = (height - frame.height) / 2;
-    const pointer = timeline.pointer || [];
-    const camera = timeline.camera || [];
-    const clicks = pointer.filter((point, index) => point.pressed && !pointer[index - 1]?.pressed);
+    frame.y = height * 34 / 900;
+    const captionY = frame.y + frame.height + (height - frame.y - frame.height) * .42;
+    const creditY = height - height * 18 / 900;
+    const scale = width / 1440;
     const background = document.createElement('canvas');
-    background.width = width;
-    background.height = height;
+    background.width = width; background.height = height;
     const backdrop = background.getContext('2d');
     const wash = backdrop.createLinearGradient(0, 0, width, height);
-    wash.addColorStop(0, '#eef2e9');
-    wash.addColorStop(.55, '#dce9e2');
-    wash.addColorStop(1, '#cbded5');
-    backdrop.fillStyle = wash;
-    backdrop.fillRect(0, 0, width, height);
-    backdrop.shadowColor = 'rgba(26, 56, 44, .19)';
-    backdrop.shadowBlur = width / 36;
-    backdrop.shadowOffsetY = height / 55;
+    wash.addColorStop(0, '#f3f5f9'); wash.addColorStop(1, '#e2e7f0');
+    backdrop.fillStyle = wash; backdrop.fillRect(0, 0, width, height);
+    backdrop.shadowColor = 'rgba(28, 38, 60, .18)'; backdrop.shadowBlur = width / 40; backdrop.shadowOffsetY = height / 70;
     backdrop.fillStyle = '#ffffff';
-    backdrop.beginPath();
-    backdrop.roundRect(frame.x, frame.y, frame.width, frame.height, frame.radius);
-    backdrop.fill();
+    backdrop.beginPath(); backdrop.roundRect(frame.x, frame.y, frame.width, frame.height, frame.radius); backdrop.fill();
+    backdrop.shadowColor = 'transparent';
+    backdrop.font = `400 ${13 * scale}px ${FONT}`; backdrop.fillStyle = '#7a8394'; backdrop.textAlign = 'center'; backdrop.textBaseline = 'middle';
+    backdrop.fillText(timeline.credit, width / 2, creditY);
 
     const arrow = new Path2D('M 0 0 L 0 25 L 6.3 19.2 L 11.3 30.4 L 16 28.2 L 10.9 17.7 L 19.7 17.6 Z');
-    const draw = time => {
-      const view = interpolate(camera, time, { scale: 1, x: sourceWidth / 2, y: sourceHeight / 2 });
-      const scale = Math.max(1, view.scale);
-      const cropWidth = sourceWidth / scale;
-      const cropHeight = sourceHeight / scale;
-      const left = clamp(view.x - cropWidth / 2, 0, sourceWidth - cropWidth);
-      const top = clamp(view.y - cropHeight / 2, 0, sourceHeight - cropHeight);
-      const pixels = frame.width / cropWidth;
-      const screenPoint = point => ({ x: frame.x + (point.x - left) * pixels, y: frame.y + (point.y - top) * pixels });
+    const clicks = Object.fromEntries(Object.entries(timeline.tracks).map(([id, track]) =>
+      [id, track.pointer.filter((point, index) => point.pressed && !track.pointer[index - 1]?.pressed)]));
 
+    function drawPointer(id, time, screenPoint) {
+      const track = timeline.tracks[id].pointer;
+      if (!track.length) return;
+      const point = interpolate(track, time, { x: sourceWidth / 2, y: sourceHeight / 2 });
+      if (point.x < 0) return;
+      const position = screenPoint(point);
+      const click = clicks[id].findLast(item => item.time <= time);
+      const elapsed = click ? time - click.time : Infinity;
+      let press = 1;
+      if (elapsed < .075) press = 1 - .14 * ease(elapsed / .075);
+      else if (elapsed < .24) press = .86 + .14 * ease((elapsed - .075) / .165);
+      if (elapsed < .3) {
+        const origin = screenPoint(click), progress = elapsed / .3;
+        ctx.fillStyle = `rgba(36, 86, 214, ${.16 * (1 - progress)})`;
+        ctx.beginPath(); ctx.arc(origin.x, origin.y, (12 + progress * 8) * scale, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.save();
+      ctx.translate(position.x, position.y); ctx.scale(press * scale, press * scale);
+      ctx.shadowColor = 'rgba(10, 18, 34, .30)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2;
+      ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#1f2633'; ctx.lineWidth = 1.65; ctx.lineJoin = 'round';
+      ctx.fill(arrow); ctx.shadowColor = 'transparent'; ctx.stroke(arrow);
+      ctx.restore();
+    }
+    function drawCaption(time) {
+      const current = timeline.captions.find(item => time >= item.from && time < item.to) || (time >= timeline.duration ? timeline.captions.at(-1) : null);
+      if (!current) return;
+      const fade = .22, alpha = Math.min(1, (time - current.from) / fade, current === timeline.captions.at(-1) ? 1 : (current.to - time) / fade);
+      const last = current === timeline.captions.at(-1);
+      ctx.save();
+      ctx.globalAlpha = clamp(alpha, 0, 1);
+      ctx.font = `600 ${30 * scale}px ${FONT}`; ctx.fillStyle = '#1b2230'; ctx.textBaseline = 'middle';
+      const textWidth = ctx.measureText(current.text).width, icon = last ? 38 * scale : 0, gap = last ? 14 * scale : 0;
+      let x = (width - textWidth - icon - gap) / 2;
+      if (last && brand) { ctx.drawImage(brand, x, captionY - icon / 2, icon, icon); x += icon + gap; }
+      ctx.textAlign = 'left';
+      ctx.fillText(current.text, x, captionY + (1 - clamp(alpha, 0, 1)) * 6 * scale);
+      ctx.restore();
+    }
+    const draw = time => {
+      const cut = timeline.cuts.find(item => time >= item.from && time < item.to) || timeline.cuts.at(-1);
+      const video = videos[cut.source];
+      // The pointer and camera follow the frame on screen: the clip's own position, not the render clock.
+      const local = video.paused && !video.ended ? time : video.currentTime + offsets[cut.source];
+      const camera = timeline.tracks[cut.track].camera;
+      const view = interpolate(camera, local, { scale: 1, x: sourceWidth / 2, y: sourceHeight / 2 });
+      const zoom = Math.max(1, view.scale), cropWidth = sourceWidth / zoom, cropHeight = sourceHeight / zoom;
+      const left = clamp(view.x - cropWidth / 2, 0, sourceWidth - cropWidth), top = clamp(view.y - cropHeight / 2, 0, sourceHeight - cropHeight);
+      const pixels = frame.width / cropWidth;
+      const ratio = { x: video.videoWidth / sourceWidth, y: video.videoHeight / sourceHeight };
+      const screenPoint = point => ({ x: frame.x + (point.x - left) * pixels, y: frame.y + (point.y - top) * pixels });
       ctx.drawImage(background, 0, 0);
       ctx.save();
-      ctx.beginPath();
-      ctx.roundRect(frame.x, frame.y, frame.width, frame.height, frame.radius);
-      ctx.clip();
-      ctx.drawImage(video, left, top, cropWidth, cropHeight, frame.x, frame.y, frame.width, frame.height);
-
-      if (pointer.length) {
-        const position = screenPoint(interpolate(pointer, time, { x: sourceWidth / 2, y: sourceHeight / 2 }));
-        const click = clicks.findLast(point => point.time <= time);
-        const elapsed = click ? time - click.time : Infinity;
-        let pressScale = 1;
-        if (elapsed < .075) pressScale = 1 - .14 * ease(elapsed / .075);
-        else if (elapsed < .24) pressScale = .86 + .14 * ease((elapsed - .075) / .165);
-
-        if (elapsed < .3) {
-          const origin = screenPoint(click);
-          const progress = elapsed / .3;
-          ctx.fillStyle = `rgba(47, 109, 96, ${.13 * (1 - progress)})`;
-          ctx.beginPath();
-          ctx.arc(origin.x, origin.y, (12 + progress * 7) * width / 1440, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.save();
-        ctx.translate(position.x, position.y);
-        ctx.scale(pressScale * width / 1440, pressScale * width / 1440);
-        ctx.shadowColor = 'rgba(10, 28, 22, .30)';
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetY = 2;
-        ctx.fillStyle = '#ffffff';
-        ctx.strokeStyle = '#24372f';
-        ctx.lineWidth = 1.65;
-        ctx.lineJoin = 'round';
-        ctx.fill(arrow);
-        ctx.shadowColor = 'transparent';
-        ctx.stroke(arrow);
-        ctx.restore();
-      }
+      ctx.beginPath(); ctx.roundRect(frame.x, frame.y, frame.width, frame.height, frame.radius); ctx.clip();
+      ctx.drawImage(video, left * ratio.x, top * ratio.y, cropWidth * ratio.x, cropHeight * ratio.y, frame.x, frame.y, frame.width, frame.height);
+      drawPointer(cut.track, local, screenPoint);
       ctx.restore();
-      ctx.strokeStyle = 'rgba(255, 255, 255, .65)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(frame.x + .5, frame.y + .5, frame.width - 1, frame.height - 1, frame.radius);
-      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255, 255, 255, .7)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(frame.x + .5, frame.y + .5, frame.width - 1, frame.height - 1, frame.radius); ctx.stroke();
+      drawCaption(time);
     };
-    return { draw, sourceWidth, sourceHeight };
+    return { draw };
   }
 
   /**
-   * timeline: { duration: seconds,
-   *   pointer: [{ time: seconds, x: sourcePixels, y: sourcePixels, pressed?: true }],
-   *   camera: [{ time: seconds, scale: 1..1.5, x: centerX, y: centerY }] }
-   * Repeat a position at a later time to hold it. A pressed point marks the
-   * start of a short click animation; include a later unpressed point before
-   * another click. Input arrays are ordered by time.
+   * sources: [{ id, url, offset }] — each clip starts at `offset` seconds on the timeline.
+   * timeline: { duration, cuts: [{ source, track, from, to }], captions: [{ from, to, text }], credit,
+   *   tracks: { [source]: { pointer: [{ time, x, y, pressed? }], camera: [{ time, scale, x, y }] } }
+   * The render clock is the wall clock. Clips play from their start without seeking (recorder MP4s seek unreliably).
    */
-  window.renderDemo = async ({ sourceURL, timeline, outputWidth = 1440, outputHeight = 900, bitrate = 10000000 }) => {
+  window.renderDemo = async ({ sources, timeline, brandURL, lang = 'en', outputWidth = 1440, outputHeight = 900, bitrate = 2400000 }) => {
+    document.documentElement.lang = lang;
     const mimeType = 'video/mp4;codecs=avc1.42002a';
     if (!MediaRecorder.isTypeSupported(mimeType)) throw new Error('H.264 Level 4.2 MP4 recording is required.');
-    const video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = 'auto';
-    video.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;pointer-events:none';
-    document.body.append(video);
-    const loaded = new Promise((resolve, reject) => {
-      video.addEventListener('loadeddata', resolve, { once: true });
-      video.addEventListener('error', () => reject(new Error('Cannot load the source recording.')), { once: true });
-    });
-    video.src = sourceURL;
-    await loaded;
-    const firstFrame = new Promise(resolve => video.requestVideoFrameCallback(resolve));
-    await video.play();
-    await firstFrame;
-    video.pause();
-    // Fragmented MP4 metadata can initially report only the first fragment.
-    // Use the recorded timeline; the playback loop also stops at the true end.
     const duration = timeline.duration;
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('A finite, positive timeline duration is required.');
-    canvas.width = outputWidth;
-    canvas.height = outputHeight;
-    const scene = createScene(video, timeline, outputWidth, outputHeight);
+    const videos = {}, offsets = {};
+    for (const source of sources) { videos[source.id] = await loadVideo(source.url); offsets[source.id] = source.offset; }
+    const brand = brandURL ? await loadImage(brandURL) : null;
+    await document.fonts.ready;
+    canvas.width = outputWidth; canvas.height = outputHeight;
+    const scene = createScene({ videos, offsets, timeline, brand, width: outputWidth, height: outputHeight });
     scene.draw(0);
-    const stream = canvas.captureStream(0);
-    const track = stream.getVideoTracks()[0];
-    const parts = [];
+    const stream = canvas.captureStream(0), track = stream.getVideoTracks()[0], parts = [];
     const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
     recorder.addEventListener('dataavailable', event => { if (event.data.size) parts.push(event.data); });
     const stopped = new Promise((resolve, reject) => {
       recorder.addEventListener('stop', resolve, { once: true });
       recorder.addEventListener('error', event => reject(event.error), { once: true });
     });
-    let frames = 0;
-    let lastDraw = -Infinity;
+    let frames = 0, lastDraw = -Infinity, started = 0;
     try {
-      await new Promise(resolve => {
-        recorder.addEventListener('start', resolve, { once: true });
-        recorder.start();
-      });
+      await new Promise(resolve => { recorder.addEventListener('start', resolve, { once: true }); recorder.start(); });
       track.requestFrame();
-      await video.play();
       await new Promise(resolve => {
         const tick = now => {
-          const time = Math.min(video.currentTime, duration);
-          if (now - lastDraw >= 1000 / FPS - 1 || video.ended || time >= duration) {
-            scene.draw(time);
-            track.requestFrame();
-            frames++;
-            lastDraw = now;
+          started ||= now;
+          const time = Math.min((now - started) / 1000, duration);
+          for (const [id, video] of Object.entries(videos)) if (video.paused && !video.ended && time >= offsets[id]) video.play();
+          if (now - lastDraw >= 1000 / FPS - 1 || time >= duration) {
+            scene.draw(time); track.requestFrame(); frames++; lastDraw = now;
           }
-          if (video.ended || time >= duration) resolve();
-          else requestAnimationFrame(tick);
+          if (time >= duration) resolve(); else requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
       });
-      video.pause();
-      // Keep the last canvas frame available for capture before closing the
-      // encoder. It also remains visible in the page for a local preview.
+      Object.values(videos).forEach(video => video.pause());
+      // Keep the last frame available to the encoder before closing it.
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       recorder.stop();
       await stopped;
@@ -198,18 +184,11 @@
         reader.addEventListener('load', () => resolve(reader.result.split(',')[1]), { once: true });
         reader.readAsDataURL(blob);
       });
-      return {
-        base64, mimeType, width: outputWidth, height: outputHeight,
-        seconds: duration, requestedFPS: FPS, requestedFrames: frames,
-        sourceWidth: scene.sourceWidth, sourceHeight: scene.sourceHeight, bytes: blob.size
-      };
+      return { base64, mimeType, width: outputWidth, height: outputHeight, seconds: duration, requestedFPS: FPS, requestedFrames: frames, bytes: blob.size };
     } finally {
-      video.pause();
       if (recorder.state !== 'inactive') recorder.stop();
       stream.getTracks().forEach(item => item.stop());
-      video.removeAttribute('src');
-      video.load();
-      video.remove();
+      for (const video of Object.values(videos)) { video.pause(); video.removeAttribute('src'); video.load(); video.remove(); }
     }
   };
 </script>
