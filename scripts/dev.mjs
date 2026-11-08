@@ -1,6 +1,7 @@
 // The dedicated test browser: a persistent Chromium profile outside the repository that loads
 // dist/extension, keeps the maintainer's one-time Bilibili login, and after every build reloads
-// the extension and refreshes the open video tabs. It opens only video pages under test.
+// the extension and refreshes the open video tabs. It opens only video pages under test. Pages run with the
+// zh-CN locale, so Bilibili serves its Chinese site instead of redirecting to /en/.
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
@@ -11,7 +12,7 @@ const root = repositoryRoot(import.meta.url);
 const extension = path.join(root, 'dist/extension');
 const buildMarker = path.join(extension, 'BUILD.json');
 const DEFAULT_VIDEO = 'https://www.bilibili.com/video/BV14nYT6mE5N/';
-const isVideoPage = url => /^https:\/\/www\.bilibili\.com\/(?:video\/(?:BV[A-Za-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+|list\/(?:watchlater|ml\d+))\/?/.test(url);
+const isVideoPage = url => /^https:\/\/www\.bilibili\.com\/(?:en\/)?(?:video\/(?:BV[A-Za-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+|list\/(?:watchlater|ml\d+))\/?/.test(url);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const log = message => console.log(`[dev ${new Date().toLocaleTimeString('en-GB')}] ${message}`);
 
@@ -96,7 +97,7 @@ export async function main(argv) {
     return;
   }
   if (!await buildStamp()) throw Error('dist/extension is missing; run npm run build first.');
-  const context = await chromium.launchPersistentContext(login.DEV_PROFILE, { channel: 'chromium', headless: false, viewport: null,
+  const context = await chromium.launchPersistentContext(login.DEV_PROFILE, { channel: 'chromium', headless: false, viewport: null, locale: 'zh-CN',
     // Always muted: the browser runs unattended and must never play sound.
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, `--remote-debugging-port=${login.DEV_PORT}`,
       '--autoplay-policy=no-user-gesture-required', '--mute-audio', '--no-first-run'] });
