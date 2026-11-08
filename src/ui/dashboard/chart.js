@@ -1,5 +1,5 @@
 // The 45 s download-speed chart: one slot per second, a monotone cubic line (no overshoot), unknown
-// slots bridged by a dashed link (never drawn as zero), a dot on the latest value and a stepped ceiling.
+// slots marked by a dashed line that is not data (never drawn as zero), a dot on the latest value and a stepped ceiling.
 // When motion is on, the line slides left one step per new sample; otherwise it only redraws.
 export const CEILING = 8;   // MB/s at the top of a speed chart or bar until a value needs more room
 // The ceiling grows in steps (8, 16, 32 … MB/s) so a fast server is never clipped and small noise is never magnified.

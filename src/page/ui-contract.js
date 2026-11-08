@@ -26,7 +26,7 @@ export const SAVING_COMMANDS = Object.freeze(['config', 'applyRoute', 'clearData
 //   delivery         { status, nativeHost, activeHost, nextTestAt, canTest, comparedHosts } from the kernel
 //   needReload, reloadReasons              whether a settings change needs a page reload, and why
 //   allowedHosts     the fixed-route host list
-// Full state (dashboard, once per second) adds: startup, startupHistory, session (per-video delivery record),
+// Full state (the dashboard polls it every 1.2 s) adds: startup, startupHistory, session (per-video delivery record),
 // counters { stalls, frameStalls, recoveries, switches, bytes, videoBytes, audioBytes, totalStallMs }, recoveryAttempts,
 // session.hosts[] also carries measuredAt: the wall time of that host's last measured fragment (null when unknown),
 // audioHost, networkEpoch, speedSamples, sampledAt, events (recent log rows).
