@@ -1,4 +1,4 @@
-// Pure decisions for measured video delivery; every threshold lives here.
+// Pure decisions for measured media delivery; every threshold lives here.
 // Changing a race limit also changes the privacy policy and store text, which quote these numbers.
 const RACE_CHALLENGERS = 2, RACE_SAMPLE_BYTES = 768 * 1024, MIN_MEASURABLE_BYTES = 128 * 1024;
 export const constants = Object.freeze({
@@ -6,7 +6,7 @@ export const constants = Object.freeze({
   THROUGHPUT_FAST_HALF_LIFE_MS: 2000, THROUGHPUT_SLOW_HALF_LIFE_MS: 5000,
   THROUGHPUT_SAMPLE_MIN_BYTES: 16 * 1024, THROUGHPUT_TRUST_MIN_BYTES: MIN_MEASURABLE_BYTES,
   THROUGHPUT_RECENT_BYTES: 4 * 1024 * 1024, THROUGHPUT_RECENT_MS: 8000,
-  STUCK_RANGE_MIN_BYTES: MIN_MEASURABLE_BYTES, STUCK_LOADED_MIN_BYTES: MIN_MEASURABLE_BYTES,
+  STUCK_RANGE_MIN_BYTES: MIN_MEASURABLE_BYTES, STUCK_AUDIO_RANGE_MIN_BYTES: 16 * 1024, STUCK_LOADED_MIN_BYTES: MIN_MEASURABLE_BYTES,
   STUCK_FIRST_BYTE_MS: 1000, STUCK_BUFFER_SECONDS: 3, COMPLETION_RESERVE_SECONDS: 2,
   STUCK_TRANSFER_MIN_MS: 500, STUCK_REMAINING_MIN_MS: 1000, STUCK_RATE_FACTOR: 1.3,
   SHORTFALL_BUFFER_SECONDS: 30, SHORTFALL_RATE_FACTOR: 1.2,
@@ -21,9 +21,10 @@ export const constants = Object.freeze({
   START_HISTORY_MAX_AGE_MS: 24 * 60 * 60 * 1000, START_HISTORY_MIN_WEIGHT: 1.5, START_FAILURE_MS: 24 * 60 * 60 * 1000, START_RATE_FACTOR: 2,
   EXPLORATION_SHARE: 1 / 5
 });
-// Why a video request should trigger a race: 'stuck', 'shortfall', 'errors' or null.
+// Why a media request should trigger a race: 'stuck', 'shortfall', 'errors' or null. Audio Ranges
+// are one small segment each and only video is measured or counts failures, so audio can only be stuck.
 export function decide(input) {
-  const { requestAgeMs, firstByteMs, rangeBytes, transferMs, loadedBytes, goodputBps, remainingMs,
+  const { kind = 'video', requestAgeMs, firstByteMs, rangeBytes, transferMs, loadedBytes, goodputBps, remainingMs,
     bufferWallSeconds, recent, requiredBps, now, failedAt } = input;
   const firstByteStuck = firstByteMs === null && requestAgeMs >= constants.STUCK_FIRST_BYTE_MS
     && bufferWallSeconds < constants.STUCK_BUFFER_SECONDS;
@@ -31,7 +32,9 @@ export function decide(input) {
     && goodputBps !== null && goodputBps < requiredBps * constants.STUCK_RATE_FACTOR
     && remainingMs !== null && remainingMs > constants.STUCK_REMAINING_MIN_MS
     && remainingMs > (bufferWallSeconds - constants.COMPLETION_RESERVE_SECONDS) * 1000;
-  if (rangeBytes >= constants.STUCK_RANGE_MIN_BYTES && (firstByteStuck || deliveryStuck)) return 'stuck';
+  const minimumBytes = kind === 'audio' ? constants.STUCK_AUDIO_RANGE_MIN_BYTES : constants.STUCK_RANGE_MIN_BYTES;
+  if (rangeBytes >= minimumBytes && (firstByteStuck || deliveryStuck)) return 'stuck';
+  if (kind === 'audio') return null;
   if ((recent.bytes >= constants.THROUGHPUT_RECENT_BYTES || recent.elapsedMs >= constants.THROUGHPUT_RECENT_MS)
     && recent.goodputBps !== null && recent.goodputBps < requiredBps * constants.SHORTFALL_RATE_FACTOR
     && bufferWallSeconds < constants.SHORTFALL_BUFFER_SECONDS) return 'shortfall';

@@ -88,7 +88,7 @@ export function createKernel(options = {}) {
     rewriteUrl: (raw, context) => active() ? router.planRoute(raw, context).url : raw, destroy };
   instances.set(root, api);
   interceptor = installInterceptor({ scope: root, active, route: router.route, prepare: router.prepare, sharingPolicy: initialGuard,
-    fragmentKey: (raw, range) => delivery.get(raw)?.kind === 'video' ? ledger.fragmentKey(raw, range) : null,
+    fragmentKey: ledger.fragmentKey,
     onSynthetic(event) {
       const { cid, at, ...record } = event;
       if (!syntheticHistory.has(cid)) syntheticHistory.set(cid, []);

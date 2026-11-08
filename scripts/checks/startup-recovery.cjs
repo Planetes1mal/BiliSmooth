@@ -33,8 +33,11 @@ open(sys.argv[2],'wb').write(k.private_bytes(serialization.Encoding.PEM,serializ
   return { cert: await fs.readFile(pem), key: await fs.readFile(key) };
 }
 
-function html(metadata, init, clusterOffset, synthetic = false) {
-  const mediaPath = '/upgcxcode/startup/101-1-30016.m4s';
+// With `whole`, the Range under test is audio: the whole video is appended first, so only audio can hold playback.
+function html(metadata, init, clusterOffset, synthetic = false, whole = null) {
+  const videoPath = '/upgcxcode/startup/101-1-30016.m4s', mediaPath = whole ? '/upgcxcode/startup/101-1-30232.m4s' : videoPath;
+  const videoTrack = `{id:80,bandwidth:900000,baseUrl:'https://${A}${videoPath}',backupUrl:[],width:640,height:360,frame_rate:'30'}`;
+  const tracks = whole ? `video:[${videoTrack}],audio:[{id:30232,bandwidth:96000,baseUrl:'https://${A}${mediaPath}',backupUrl:[]}]` : `video:[${videoTrack}]`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>Isolated native startup recovery</title></head>
 <body><button id="start">Start native startup fixture</button><div class="bpx-player-container"><video muted playsinline style="width:640px;height:360px"></video></div>
 <script>(()=>{
@@ -42,15 +45,15 @@ const video=document.querySelector('video'),state={events:[],requests:[],errors:
 const init=Uint8Array.from(atob(${JSON.stringify(init.toString('base64'))}),c=>c.charCodeAt(0));
 let source,buffer;const synthetic=${synthetic};
 for(const name of ['loadedmetadata','loadeddata','seeking','seeked','waiting','playing','pause','error'])video.addEventListener(name,()=>state.events.push({name,at:performance.now(),readyState:video.readyState,paused:video.paused,seeking:video.seeking}));
-function frame(now,data){state.frames++;if(state.firstFrameAt===null)state.firstFrameAt=now;state.lastFrame={at:now,time:data.mediaTime};video.requestVideoFrameCallback(frame);}
-function append(bytes){return new Promise((resolve,reject)=>{const done=()=>{cleanup();resolve();},fail=()=>{cleanup();reject(Error('append failed'));},cleanup=()=>{buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);};buffer.addEventListener('updateend',done);buffer.addEventListener('error',fail);buffer.appendBuffer(bytes);});}
+function frame(now,data){state.frames++;if(state.firstFrameAt===null)state.firstFrameAt=now;if(state.movedAt===undefined&&data.mediaTime>0)state.movedAt=now;state.lastFrame={at:now,time:data.mediaTime};video.requestVideoFrameCallback(frame);}
+function append(bytes,target=buffer){return new Promise((resolve,reject)=>{const done=()=>{cleanup();resolve();},fail=()=>{cleanup();reject(Error('append failed'));},cleanup=()=>{target.removeEventListener('updateend',done);target.removeEventListener('error',fail);};target.addEventListener('updateend',done);target.addEventListener('error',fail);target.appendBuffer(bytes);});}
 function request(attempt=0){
  const record={attempt,at:performance.now(),requestedTarget:BiliSmoothRuntime.getState().targetHost,outcome:'pending'};state.requests.push(record);
  const xhr=new XMLHttpRequest();xhr.open('GET','https://${A}${mediaPath}');xhr.responseType='arraybuffer';xhr.timeout=10000;
- xhr.setRequestHeader('Range','bytes=${clusterOffset}-${metadata.videoBytes - 1}');
+ xhr.setRequestHeader('Range','bytes=${clusterOffset}-${(whole ? metadata.audioBytes : metadata.videoBytes) - 1}');
  // Registered before send, just as a player owns its request timeout/retry.
  const handlers={
- timeout:()=>{record.outcome='timeout';record.finishedAt=performance.now();record.retryTarget=BiliSmoothRuntime.getState().targetHost;
+ timeout:()=>{record.outcome='timeout';record.finishedAt=performance.now();record.retryTarget=BiliSmoothRuntime.getState().targetHost;record.atTimeout={currentTime:video.currentTime,readyState:video.readyState};
   if(attempt<1)request(attempt+1);else state.errors.push('both requests timed out');},
  progress:event=>{record.bytes=event.loaded;},
  error:()=>{record.outcome='error';state.errors.push('XHR network error');},
@@ -63,9 +66,10 @@ function request(attempt=0){
  xhr.send();
 }
 async function start(){if(state.started)return;state.started=true;state.startedAt=performance.now();
- const payload={data:{dash:{video:[{id:80,bandwidth:900000,baseUrl:'https://${A}${mediaPath}',backupUrl:[],width:640,height:360,frame_rate:'30'}]}}};
+ const payload={data:{dash:{${tracks}}}};
  window.__playinfo__=payload;source=new MediaSource();video.src=URL.createObjectURL(source);
- await new Promise(resolve=>source.addEventListener('sourceopen',resolve,{once:true}));buffer=source.addSourceBuffer(${JSON.stringify(metadata.videoType)});source.duration=${metadata.durationSeconds};
+ await new Promise(resolve=>source.addEventListener('sourceopen',resolve,{once:true}));buffer=source.addSourceBuffer(${JSON.stringify(whole ? metadata.audioType : metadata.videoType)});source.duration=${metadata.durationSeconds};
+ ${whole ? `const whole=source.addSourceBuffer(${JSON.stringify(metadata.videoType)});await append(Uint8Array.from(atob(${JSON.stringify(whole.toString('base64'))}),c=>c.charCodeAt(0)),whole);state.videoBuffered=whole.buffered.end(0);` : ''}
  video.requestVideoFrameCallback(frame);const metadataReady=new Promise(resolve=>video.addEventListener('loadedmetadata',resolve,{once:true}));await append(init);await metadataReady;
  if(synthetic)void video.play();else video.currentTime=2;state.beforeRequest={paused:video.paused,seeking:video.seeking,readyState:video.readyState,frames:state.frames};request();
 }
@@ -75,8 +79,10 @@ window.startupFixture={state,snapshot:()=>({at:performance.now(),currentTime:vid
 })();</script></body></html>`;
 }
 
-async function run(adaptive, directory, server, metadata, video, clusterOffset, synthetic = false) {
-  const name = synthetic ? 'synthetic-first-fragment' : adaptive ? 'adaptive' : 'original-control', run = { name, adaptive, synthetic, pageErrors: [], networkErrors: [] };
+async function run(adaptive, directory, server, metadata, video, clusterOffset, synthetic = false, audio = null) {
+  const name = audio ? 'synthetic-audio' : synthetic ? 'synthetic-first-fragment' : adaptive ? 'adaptive' : 'original-control', run = { name, adaptive, synthetic, pageErrors: [], networkErrors: [] };
+  const audioCluster = audio ? audio.indexOf(Buffer.from([0x1f, 0x43, 0xb6, 0x75])) : 0;
+  const body = audio ? html(metadata, audio.subarray(0, audioCluster), audioCluster, true, video) : html(metadata, video.subarray(0, clusterOffset), clusterOffset, synthetic);
   const profile = await fs.mkdtemp(path.join(directory, name + '-')), extension = path.join(profile, 'extension');
   await fs.cp(path.join(root, 'dist/extension'), extension, { recursive: true });
   await assertBuildMatches(root, extension);
@@ -94,7 +100,7 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset, 
     await context.grantPermissions(['local-network-access'], { origin: 'https://www.bilibili.com' });
     await context.route('**/*', route => {
       const url = new URL(route.request().url());
-      if (url.href === pageUrl) return route.fulfill({ contentType: 'text/html', body: html(metadata, video.subarray(0, clusterOffset), clusterOffset, synthetic) });
+      if (url.href === pageUrl) return route.fulfill({ contentType: 'text/html', body });
       if (url.pathname.startsWith('/upgcxcode/') && /\.bilivideo\.com$/.test(url.hostname)) {
         const target = new URL(`https://127.0.0.1:${server.address().port}${url.pathname}`);
         target.searchParams.set('run', name); target.searchParams.set('host', url.hostname); return route.continue({ url: target.href });
@@ -138,7 +144,8 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset, 
     try { await fs.access(path.join(mediaDir, 'metadata.json')); }
     catch { execFileSync(process.execPath, [path.join(__dirname, 'media-fixture.cjs')], { timeout: 60000 }); }
     const metadata = JSON.parse(await fs.readFile(path.join(mediaDir, 'metadata.json'), 'utf8')), video = await fs.readFile(path.join(mediaDir, 'video.webm'));
-    if (hash(video) !== metadata.videoSha256) throw Error('Native generated video checksum mismatch');
+    const audio = await fs.readFile(path.join(mediaDir, 'audio.webm'));
+    if (hash(video) !== metadata.videoSha256 || hash(audio) !== metadata.audioSha256) throw Error('Native generated media checksum mismatch');
     const clusterOffset = video.indexOf(Buffer.from([0x1f, 0x43, 0xb6, 0x75]));
     if (clusterOffset <= 0) throw Error('WebM fixture has no first Cluster boundary');
     server = https.createServer(await certificate(directory), (request, response) => {
@@ -147,15 +154,27 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset, 
         'Access-Control-Expose-Headers': 'Content-Length,Content-Range', 'Timing-Allow-Origin': '*', 'Content-Type': 'video/webm', 'Cache-Control': 'no-store' };
       if (request.method === 'OPTIONS') { response.writeHead(204, headers); response.end(); return; }
       const range = /^bytes=(\d+)-(\d+)$/.exec(request.headers.range || '');
-      const start = range ? Number(range[1]) : 0, end = range ? Number(range[2]) : video.length - 1, body = video.subarray(start, end + 1);
-      const hangs = name === 'synthetic-first-fragment' ? host !== B : host === A;
-      const row = { name, host, range: request.headers.range || null, at: Date.now(), outcome: hangs ? name === 'synthetic-first-fragment' ? 'zero-body-hang' : 'partial-body-hang' : 'complete' }; network.push(row);
-      response.writeHead(206, { ...headers, 'Content-Length': String(body.length), 'Content-Range': `bytes ${start}-${end}/${video.length}` }); response.flushHeaders();
-      if (hangs) { if (name !== 'synthetic-first-fragment') response.write(body.subarray(0, 128)); } else response.end(body);
+      const file = url.pathname.endsWith('-30232.m4s') ? audio : video, zeroBody = name.startsWith('synthetic-');
+      const start = range ? Number(range[1]) : 0, end = range ? Number(range[2]) : file.length - 1, body = file.subarray(start, end + 1);
+      const hangs = zeroBody ? host !== B : host === A;
+      const row = { name, host, range: request.headers.range || null, at: Date.now(), outcome: hangs ? zeroBody ? 'zero-body-hang' : 'partial-body-hang' : 'complete' }; network.push(row);
+      response.writeHead(206, { ...headers, 'Content-Length': String(body.length), 'Content-Range': `bytes ${start}-${end}/${file.length}` }); response.flushHeaders();
+      if (hangs) { if (!zeroBody) response.write(body.subarray(0, 128)); } else response.end(body);
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const [adaptive, legacy] = await Promise.all([run(true, directory, server, metadata, video, clusterOffset), run(false, directory, server, metadata, video, clusterOffset)]);
     const synthetic = await run(true, directory, server, metadata, video, clusterOffset, true);
+    const audioRun = await run(true, directory, server, metadata, video, clusterOffset, true, audio);
+    const [hung, retried] = audioRun.fixture?.requests || [];
+    check('synthetic audio: a hung audio Range holds fully buffered video, retries on the winner and decodes within two seconds',
+      audioRun.fixture?.videoBuffered >= metadata.durationSeconds - 0.5 && hung?.outcome === 'timeout' && (hung.bytes || 0) === 0
+      && hung.atTimeout?.currentTime === 0 && hung.atTimeout.readyState <= 1 && retried?.outcome === 'complete' && retried.status === 206
+      && retried.at - hung.at < 2000 && audioRun.fixture.movedAt - hung.at < 2000 && audioRun.final?.frames >= 10 && audioRun.final.currentTime > 0
+      && audioRun.final.diagnostics?.session?.lastRace?.track === 'audio'
+      && network.some(row => row.name === audioRun.name && row.host === B && row.outcome === 'complete')
+      && !audioRun.fatal && !audioRun.fixture.errors.length && !audioRun.pageErrors.length && !audioRun.final.error,
+      { videoBuffered: audioRun.fixture?.videoBuffered, requests: audioRun.fixture?.requests, lastRace: audioRun.final?.diagnostics?.session?.lastRace,
+        fatal: audioRun.fatal, errors: audioRun.fixture?.errors, pageErrors: audioRun.pageErrors });
     const [first, retry] = synthetic.fixture?.requests || [];
     check('synthetic: first fragment hangs, retries on the winner and decodes within two seconds',
       first?.outcome === 'timeout' && (first.bytes || 0) === 0 && retry?.outcome === 'complete' && retry.status === 206

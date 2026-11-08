@@ -29,13 +29,15 @@ export function createRaceCoordinator({ root, document, now, wallNow, nativeFetc
     const sustained = measured?.goodputBps ? Math.min(measured.goodputBps, measured.recentBps) : 0;
     row.failures = row.failures.filter(failure => at - failure.at <= C.ERROR_WINDOW_MS);
     const player = watchedVideo(), requiredBps = session.requiredBps * (player?.playbackRate || 1);
-    const keepHost = trigger === 'stuck' && requiredBps > 0 && sustained >= requiredBps * C.SHORTFALL_RATE_FACTOR
+    // An audio sample is one small segment: it moves only its own Range and never rates a host.
+    const audio = request.representationKind === 'audio';
+    const keepHost = audio || trigger === 'stuck' && requiredBps > 0 && sustained >= requiredBps * C.SHORTFALL_RATE_FACTOR
       && !row.failures.some(failure => failure.host === currentHost);
-    if (trigger === 'stuck') ledger.noteHostFailure(request, currentHost);
+    if (trigger === 'stuck' && !audio) ledger.noteHostFailure(request, currentHost);
     const currentRate = request.bytes * 8000 / ((request.completedAt || now()) - request.startedAt) || (request.completedAt ? sustained : 0);
     const rate = Math.min(currentRate, measured?.recentBps ?? Infinity);
     const currentMs = rate > 0 ? (end - start + 1) * 8000 / rate : Infinity;
-    const record = { at, networkEpoch: epoch, currentHost, requestId: request.id, trigger, range: `bytes=${start}-${end}`, contenders: targets.map(target => target.host),
+    const record = { at, networkEpoch: epoch, currentHost, requestId: request.id, track: audio ? 'audio' : 'video', trigger, range: `bytes=${start}-${end}`, contenders: targets.map(target => target.host),
       currentMs: Number.isFinite(currentMs) ? currentMs : null, verdict: null, winner: null, runnerUp: null, samples: [], switched: false };
     row.races.push(record);
     session.lastRace = record;
@@ -57,24 +59,24 @@ export function createRaceCoordinator({ root, document, now, wallNow, nativeFetc
           const scope = keepHost || previousHost === sample.host ? 'fragment' : 'video';
           ledger.fragmentState(row, key).host = sample.host;
           if (scope === 'fragment') {
-            if (!session.activeHost || session.activeEpoch !== epoch) session.activeHost = currentHost;
+            if (!audio && (!session.activeHost || session.activeEpoch !== epoch)) session.activeHost = currentHost;
             record.verdict = 'fragment';
           } else {
             session.activeHost = sample.host; row.switchCount++; record.switched = true; record.verdict = 'switched';
           }
-          session.activeEpoch = epoch;
+          if (!audio) session.activeEpoch = epoch;
           const change = { at: wallNow(), fromHost: currentHost, toHost: sample.host, scope, range: request.range };
           row.switches.push(change); log('switch', { ...change, id: request.id, reason: trigger });
           decided();
           // The player may have abandoned the raced attempt and retried the Range elsewhere.
-          const attempt = [...ledger.videoRequests.values()].reverse().find(item => item.host !== sample.host
+          const attempt = [...ledger.mediaRequests.values()].reverse().find(item => item.host !== sample.host
             && ledger.fragmentKey(item.originalUrl, item.range) === key) || request;
           interceptor().syntheticTimeout(attempt.id);
         } else { record.verdict = sample.elapsedMs >= currentMs ? 'current-fastest' : 'below-margin'; decided(); }
       }
     }).then(result => {
       if (measuredRace !== round) return;
-      measuredRace = null; history.recordRace(result.samples); saveHistory(); record.samples = result.samples; record.runnerUp = result.runnerUp?.host || null; row.runnerUp = record.runnerUp;
+      measuredRace = null; history.recordRace(audio ? result.samples.filter(sample => !sample.ok) : result.samples); saveHistory(); record.samples = result.samples; record.runnerUp = result.runnerUp?.host || null; row.runnerUp = record.runnerUp;
       if (!record.winner) { record.verdict = 'no-completion'; decided(); }
       log('race', { reason: 'finished', id: request.id, host: record.winner || currentHost, bytes: result.totalBytes });
     });

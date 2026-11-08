@@ -3,10 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import loadKernel from '../support/kernel-harness.js';
 import sharedEmitter from '../support/emitter.cjs';
-const A = 'upos-sz-mirroraliov.bilivideo.com', B = 'upos-sz-mirrorcosov.bilivideo.com';
+const A = 'upos-sz-mirroraliov.bilivideo.com', B = 'upos-sz-mirrorcosov.bilivideo.com', C = 'upos-sz-mirrorhwov.bilivideo.com';
 const media = (host = A, cid = '42231991605') => `https://${host}/upgcxcode/1/${cid}-1-30080.m4s`;
+const audio = (host = C, cid = '42231991605') => `https://${host}/upgcxcode/1/${cid}-1-30232.m4s`;
 const payload = (cid = '42231991605', fps = '60') => ({ data: { dash: { video: [{ id: 120, bandwidth: 9000000,
-  baseUrl: media(A, cid), backupUrl: [media(B, cid)], width: 3840, height: 2160, frame_rate: fps }] } } });
+  baseUrl: media(A, cid), backupUrl: [media(B, cid)], width: 3840, height: 2160, frame_rate: fps }],
+  audio: [{ id: 30232, bandwidth: 132000, baseUrl: audio(C, cid), backupUrl: [audio(B, cid)] }] } } });
 const preparing = { paused: true, seeking: true, readyState: 1, currentTime: 139 };
 function harness({ initial = {}, config = {}, fps = '60', rvfc = false } = {}) {
   const pending = [], h = loadKernel({ session: true, now: 1788836240000, video: initial, rvfc,
@@ -99,6 +101,29 @@ test('measured requests retry safely, disable unconfirmed synthetic timeouts and
       assert.equal(delivered, 1); assert.equal(later.readyState, 1);
       assert.equal(h.kernel.getState().session.syntheticTimeouts.enabled, false);
     }
+    h.close();
+  }
+});
+
+test('a stuck audio Range is compared and retried once on the winner without moving the video', async () => {
+  // Recorded audio Ranges are 47-69 KiB, below the video minimum; MSE cannot play past missing audio.
+  for (const scenario of ['stuck audio', 'audio header', 'buffered audio']) {
+    const h = harness({ initial: preparing }); h.buffer(scenario === 'buffered audio' ? 20 : 0); h.video.emit('loadedmetadata'); h.video.emit('seeking');
+    const range = scenario === 'audio header' ? 'bytes=0-836' : 'bytes=1729-67208';
+    let retry; h.request(audio(), range, () => { retry = h.request(audio(), range); });
+    h.advance(1000, { move: false }); await h.flush();
+    if (scenario !== 'stuck audio') { assert.equal(h.pending.length, 0, scenario); h.close(); continue; }
+    assert.equal(h.pending.length, 2, 'one comparison of the stuck audio Range');
+    assert.ok(h.pending.every(item => item.init.headers.Range === range));
+    h.advance(200, { move: false }); await h.deliver(h.pending[0]);
+    assert.equal(new URL(retry.url).hostname, new URL(h.pending[0].url).hostname, 'the player retry moves to the winner');
+    const session = h.kernel.getState().session;
+    assert.equal(session.lastRace.track, 'audio'); assert.equal(session.lastRace.verdict, 'fragment'); assert.equal(session.switchCount, 0);
+    assert.equal(new URL(h.request(media(), 'bytes=0-1048575').url).hostname, A, 'video keeps its host');
+    assert.equal(new URL(h.request(audio(), 'bytes=67209-126000').url).hostname, C, 'later audio Ranges keep their host');
+    h.advance(30000, { move: false }); await h.flush(); assert.equal(h.pending.length, 2, 'the Range is compared once');
+    const history = [...h.store].find(([key]) => key.startsWith('bilismooth.delivery-history.v1.'));
+    assert.ok(JSON.parse(history[1]).rows.every(row => !row.meanBps), 'an audio sample never rates a host');
     h.close();
   }
 });

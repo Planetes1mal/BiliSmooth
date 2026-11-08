@@ -190,6 +190,8 @@ test('COSOV hanging, slow and repeated-timeout shapes trigger only their measure
     ['remaining transfers within one second keep the current host', decide, [{ ...delayed, remainingMs: 1000 }], null],
     ['a current rate meeting the approved margin is retained', decide, [{ ...delayed, goodputBps: base.requiredBps * 1.3 }], null],
     ['two recorded timeouts occur within thirty seconds', decide, [{ ...base, failedAt: [first, second] }], 'errors'],
+    ['a recorded 64 KiB audio segment without bytes is stuck', decide, [{ ...base, kind: 'audio', requestAgeMs: 2070, firstByteMs: null, rangeBytes: 65480, bufferWallSeconds: 0 }], 'stuck'],
+    ['audio cannot trigger shortfall or error counts', decide, [{ ...base, kind: 'audio', recent: slow, bufferWallSeconds: 0, failedAt: [first, second] }], null],
     ['the first recorded timeout has left the error window', decide, [{ ...base, now: first + 30001, failedAt: [first, second] }], null],
     ['HW completion beats COSOV estimate for the same retry bytes', beatsCurrent, [2962.9, 5874782 * 8000 / goodputBps], true],
     ['a one-point-five speedup is enough', beatsCurrent, [2000, 3000], true],

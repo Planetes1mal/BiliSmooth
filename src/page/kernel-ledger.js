@@ -1,4 +1,4 @@
-// Request bookkeeping for the current video: in-flight video requests, per-video retention
+// Request bookkeeping for the current video: in-flight video and audio requests, per-video retention
 // (switch counts, cooldowns, raced ranges, fragment hosts, failures, races, switches), per-host
 // throughput and the network epoch that invalidates old evidence.
 import { constants as C } from '../core/delivery-policy.js';
@@ -6,7 +6,7 @@ import { create as createThroughput } from '../core/throughput.js';
 
 export function createLedger({ delivery, now, wallNow, document, emit, hostOf, absolute, classifyRequest, playbackEvidence, requestGeneration,
   watchedVideo, watchVideo, recordHostFailure, onFragmentComplete, afterChange }) {
-  const videoRequests = new Map(), recentFragments = new Map(), retention = new Map(), measurements = new Map();
+  const mediaRequests = new Map(), recentFragments = new Map(), retention = new Map(), measurements = new Map();
   let requestSerial = 0, networkEpoch = 0, mediaGeneration;
 
   function retained(cid) {
@@ -31,7 +31,7 @@ export function createLedger({ delivery, now, wallNow, document, emit, hostOf, a
     row.failures.push({ host, at });
     recordHostFailure(host, at);
   }
-  function clearMediaRequests() { videoRequests.clear(); recentFragments.clear(); }
+  function clearMediaRequests() { mediaRequests.clear(); recentFragments.clear(); }
   function beginRequest(originalUrl, url, transport, method, range = '') {
     // The first request from a replaced player can precede both observation
     // intervals. Synchronize ownership now so it is not tagged as old media.
@@ -46,8 +46,8 @@ export function createLedger({ delivery, now, wallNow, document, emit, hostOf, a
       transport, method, range, startedAt: now(), kind, networkEpoch,
       cid: representation?.cid ?? null, representationKind: representation?.kind ?? null,
       mediaGeneration: generation, player: watchedVideo() };
-    if (request.representationKind === 'video' && transport === 'xhr') {
-      request.bytes = 0; request.firstByteAt = null; request.hiddenOverlap = !!document?.hidden; videoRequests.set(request.id, request);
+    if (['video', 'audio'].includes(request.representationKind) && transport === 'xhr') {
+      request.bytes = 0; request.firstByteAt = null; request.hiddenOverlap = !!document?.hidden; mediaRequests.set(request.id, request);
     }
     // DOM references are private request ownership, never part of event data.
     const { player, ...observed } = request;
@@ -60,11 +60,11 @@ export function createLedger({ delivery, now, wallNow, document, emit, hostOf, a
       transport: request.transport, method: request.method, range: request.range, startedAt: request.startedAt,
       elapsedMs: Math.max(0, now() - request.startedAt), bytes: 0, complete: false, ...detail };
     emit(event);
-    if (videoRequests.has(request.id)) {
+    if (mediaRequests.has(request.id)) {
       request.bytes = event.bytes; request.firstByteAt = event.firstByteAt; request.hiddenOverlap = event.hiddenOverlap;
       if (type === 'transfer') {
-        videoRequests.delete(request.id);
-        if (event.complete) { request.completedAt = event.completedAt; recentFragments.set(request.cid, request); }
+        mediaRequests.delete(request.id);
+        if (event.complete && request.representationKind === 'video') { request.completedAt = event.completedAt; recentFragments.set(request.cid, request); }
       }
     }
     if (type === 'transfer' && request.cid && request.networkEpoch === networkEpoch) {
@@ -95,15 +95,16 @@ export function createLedger({ delivery, now, wallNow, document, emit, hostOf, a
   }
   // The request a race measures: the foreground in-flight video request, else the last completed fragment.
   function raceableRequest(session) {
-    return [...videoRequests.values()].find(item => item.cid === session.cid && !item.hiddenOverlap) || recentFragments.get(session.cid) || null;
+    return [...mediaRequests.values()].find(item => item.cid === session.cid && item.representationKind === 'video' && !item.hiddenOverlap)
+      || recentFragments.get(session.cid) || null;
   }
   const measurementFor = (cid, host) => measurements.get(cid)?.snapshot().find(row => row.host === host);
   function resetNetwork() {
     networkEpoch++; clearMediaRequests(); measurements.clear();
     for (const row of retention.values()) { row.fragments.clear(); row.failures = []; row.runnerUp = null; }
   }
-  function markHidden() { for (const request of videoRequests.values()) request.hiddenOverlap = true; }
+  function markHidden() { for (const request of mediaRequests.values()) request.hiddenOverlap = true; }
   return { retained, fragmentKey, fragmentState, noteHostFailure, beginRequest, reportTransfer, clearMediaRequests, raceableRequest,
-    measurementFor, measurements, videoRequests, resetNetwork, markHidden, epoch: () => networkEpoch,
+    measurementFor, measurements, mediaRequests, resetNetwork, markHidden, epoch: () => networkEpoch,
     generation: () => mediaGeneration };
 }
