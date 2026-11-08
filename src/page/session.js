@@ -78,7 +78,7 @@ export function createSession({ scope, version = 'dev', createKernel = defaultCr
       targetHost: config.selection === 'fixed' ? config.pcdnHost : kernel.getFlags().delivery?.activeHost || hosts.requestedHost,
       videoBytes: transfers.counters().videoBytes, audioBytes: transfers.counters().audioBytes, networkEpoch, mediaGeneration: observer.generation() });
   }
-  const runtime = createRuntimeContract({ version, document, settings, sync, observer, meta, speed, transfers, episodes, startup, events, kernel, listeners, clone, notify,
+  const runtime = createRuntimeContract({ version, document, now, wallNow, settings, sync, observer, meta, speed, transfers, episodes, startup, events, kernel, listeners, clone, notify,
     actions: { resetNetwork, clearData, networkEpoch: () => networkEpoch, sampledAt: () => sampledAt } });
   sessions.set(scope, runtime);
 

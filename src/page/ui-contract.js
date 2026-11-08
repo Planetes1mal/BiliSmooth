@@ -28,8 +28,9 @@ export const SAVING_COMMANDS = Object.freeze(['config', 'applyRoute', 'clearData
 //   allowedHosts     the fixed-route host list
 // Full state (dashboard, once per second) adds: startup, startupHistory, session (per-video delivery record),
 // counters { stalls, frameStalls, recoveries, switches, bytes, videoBytes, audioBytes, totalStallMs }, recoveryAttempts,
+// session.hosts[] also carries measuredAt: the wall time of that host's last measured fragment (null when unknown),
 // audioHost, networkEpoch, speedSamples, sampledAt, events (recent log rows).
-export function createRuntimeContract({ version, document, settings, sync, observer, meta, speed, transfers, episodes, startup, events, kernel, listeners, clone, notify, actions }) {
+export function createRuntimeContract({ version, document, now, wallNow, settings, sync, observer, meta, speed, transfers, episodes, startup, events, kernel, listeners, clone, notify, actions }) {
   function view() {
     const config = sync.config(), current = observer.current(), flags = kernel.getFlags(), hosts = transfers.hosts();
     const buffer = observer.bufferSeconds(), rate = observer.player()?.playbackRate || 1;
@@ -47,7 +48,10 @@ export function createRuntimeContract({ version, document, settings, sync, obser
   function state() {
     observer.refresh();
     const k = kernel.getState(), counters = { ...transfers.counters(), ...episodes.counters() };
-    return { ...view(), startup: startup.snapshot(), startupHistory: clone(startup.history()), session: k.session,
+    // Fragment times use the page's performance clock; the dashboard needs wall time to say how old a measurement is.
+    const offset = wallNow() - now(), measuredAt = row => Number.isFinite(row.lastFragment?.completedAt) ? Math.round(row.lastFragment.completedAt + offset) : null;
+    const session = k.session && { ...k.session, hosts: (k.session.hosts || []).map(row => ({ ...row, measuredAt: measuredAt(row) })) };
+    return { ...view(), startup: startup.snapshot(), startupHistory: clone(startup.history()), session,
       counters, recoveryAttempts: k.session?.switches.length || 0, audioHost: transfers.hosts().audioHost,
       networkEpoch: actions.networkEpoch(), speedSamples: clone(speed.samples()), sampledAt: actions.sampledAt(), events: clone(events.recent()) };
   }
