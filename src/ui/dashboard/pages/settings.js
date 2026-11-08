@@ -30,9 +30,11 @@ export function createSettings(stack, app) {
   const floating = card('floating', h('div.rows', h('div.line.label', h('b', { 'data-t': 'collapsedShows' }))),
     h('div.etiles', { role: 'radiogroup', 'data-t-label': 'collapsedShows' }, tiles.map(item => item.tile)), h('div.rows', line('position', position)));
 
+  const start = toggle('startSwitch', save('startOnBest'));
+  const startRow = line('startSwitch', start, 'automaticOnly');
   const stall = toggle('stallSwitch', save('stallRecovery'));
   const stallRow = line('stallSwitch', stall, 'automaticOnly');
-  const playback = card('playback', h('div.rows', stallRow));
+  const playback = card('playback', h('div.rows', startRow, stallRow));
 
   const theme = segmented([['system', 'system'], ['light', 'light'], ['dark', 'dark']], save('theme'), 'theme');
   const accentName = h('span.swatch-name');
@@ -105,6 +107,8 @@ export function createSettings(stack, app) {
       renderPill(item, values, tone);
     }
     position.disabled = !connected || app.busy('position');
+    start.checked = config.startOnBest !== false;
+    startRow.classList.toggle('off', serverChoice(config) !== 'auto');
     stall.checked = config.stallRecovery !== false;
     stallRow.classList.toggle('off', serverChoice(config) !== 'auto');
     theme.set(config.theme);

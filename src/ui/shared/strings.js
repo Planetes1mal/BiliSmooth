@@ -25,8 +25,10 @@ export const strings = Object.freeze({
   automatic: ['自动选择', 'Automatic'],
   biliDefault: ['B站默认', 'Bilibili default'],
   fixedGroup: ['固定使用一条线路', 'Always use one server'], use: ['使用', 'Use'],
-  customServer: ['自定义线路', 'Custom server'], customPlaceholder: ['输入 upos 开头的 B站视频域名', 'Enter a Bilibili upos host'], addCustom: ['添加', 'Add'],
-  badHost: ['只能填写 upos 开头的 bilivideo 域名，不含端口和路径。', 'Use an upos bilivideo host without a port or path.'],
+  customServer: ['自定义线路', 'Custom server'], customPlaceholder: ['输入 upos 或 bcache 节点域名', 'Enter a upos or bcache host'], addCustom: ['添加', 'Add'],
+  badHost: ['只能填写 bilivideo 下的 upos 或 bcache 节点域名，不含端口和路径。', 'Use a upos or bcache host under bilivideo, without a port or path.'],
+  customFull: ['最多添加 {n} 条自定义线路。', 'You can add up to {n} custom servers.'], removeServer: ['删除{name}', 'Remove {name}'],
+  startSwitch: ['开播时用测得最快的线路', 'Start on the fastest tested server'],
   replaceWhen: ['什么时候替换', 'When to replace'], replaceSlow: ['只在变慢时', 'Only when slow'], replaceAlways: ['始终', 'Always'],
   firstByte: ['首字节', 'First byte'], tested: ['测速时间', 'Tested'],
 

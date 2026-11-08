@@ -96,14 +96,23 @@ test('server choices send the documented patch or command', async t => {
   assert.deepEqual((await waitSent(page, 4, 'config', 'applyRoute')).at(-1).patch, { mode: 'force' });
   await page.locator(`label.ropt[data-choice="auto"]`).click();
   await page.locator('.line.when').waitFor({ state: 'hidden' });
-  // A custom host is validated before anything is sent.
-  await page.getByRole('textbox', { name: '自定义线路' }).fill('upos-sz-mirrorali.bilivideo.com:8082');
+  // A server the user adds is validated, then joins the saved list without changing the choice.
+  const bcache = 'cn-jxnc-cmcc-bcache-06.bilivideo.com', box = page.getByRole('textbox', { name: '自定义线路' });
+  await box.fill('upos-sz-mirrorali.bilivideo.com:8082');
   await page.getByRole('button', { name: '添加' }).click();
   await page.locator('#custom-error').waitFor();
-  assert.equal((await sent(page, 'applyRoute')).length, 1);
-  await page.getByRole('textbox', { name: '自定义线路' }).fill('UPOS-SZ-MIRRORALI.bilivideo.com');
+  assert.equal((await sent(page, 'config', 'applyRoute')).length, 5);
+  await box.fill('CN-JXNC-CMCC-BCACHE-06.bilivideo.com');
   await page.getByRole('button', { name: '添加' }).click();
-  assert.deepEqual((await waitSent(page, 2, 'applyRoute')).at(-1).patch, { host: 'upos-sz-mirrorali.bilivideo.com' });
+  const added = (await waitSent(page, 6, 'config', 'applyRoute')).at(-1);
+  assert.deepEqual({ action: added.action, patch: added.patch }, { action: 'config', patch: { customHosts: [bcache] } });
+  // It is chosen like any server; removing the fixed server returns to Automatic.
+  await page.locator(`label.ropt[data-choice="${bcache}"]`).click();
+  assert.deepEqual((await waitSent(page, 2, 'applyRoute')).at(-1).patch, { host: bcache });
+  await page.getByRole('button', { name: '删除cn-jxnc-cmcc-bcache-06' }).click();
+  assert.deepEqual((await waitSent(page, 8, 'config', 'applyRoute')).at(-1).patch, { customHosts: [], selection: 'auto', pcdnHost: cos });
+  await page.locator(`label.ropt[data-choice="${bcache}"]`).waitFor({ state: 'detached' });
+  assert.equal((await sent(page, 'applyRoute')).length, 2, 'removing does not choose the row');
   // The Overview quick select uses the same commands.
   await page.locator('.nav a[data-page="overview"]').click();
   await page.locator('.quick select').selectOption(ali);
@@ -133,6 +142,15 @@ test('theme, accent and language apply at once and are saved', async t => {
   await page.waitForFunction(() => document.documentElement.lang === 'en');
   assert.equal(await page.locator('.nav a[data-page="routes"]').textContent(), 'Servers');
   assert.deepEqual((await waitSent(page, 3, 'config')).map(call => call.patch), [{ theme: 'light' }, { accent: 'pink' }, { lang: 'en' }]);
+});
+
+test('starting on the fastest tested server saves at once and applies with Automatic only', async t => {
+  const page = await open(t, { hash: 'settings' }), name = '开播时用测得最快的线路';
+  assert.equal(await page.getByRole('switch', { name }).isChecked(), true, 'on for a record saved before the switch existed');
+  await page.getByRole('switch', { name }).click();
+  assert.deepEqual((await waitSent(page, 1, 'config')).map(call => call.patch), [{ startOnBest: false }]);
+  const fixed = await open(t, { hash: 'settings', settings: { selection: 'fixed', pcdnHost: hw } });
+  assert.equal(await fixed.locator('.line').filter({ has: fixed.getByRole('switch', { name }) }).getAttribute('class'), 'line off');
 });
 
 test('a failed save is shown, rolled back and retried', async t => {
@@ -173,6 +191,14 @@ test('custom hosts, blocked videos and the entry preview read as in the floating
   const custom = 'upos-sz-mirrorcustom.bilivideo.com';
   const page = await open(t, { hash: 'routes', settings: { selection: 'auto', pcdnHost: custom } });
   await page.locator(`label.ropt[data-choice="${custom}"]`).waitFor();
+  // The saved list is full at eight servers.
+  const own = Array.from({ length: 8 }, (_, index) => `upos-sz-mirror${index}x.bilivideo.com`);
+  const full = await open(t, { hash: 'routes', settings: { customHosts: own } });
+  assert.equal(await full.locator('.hostrows .remove:not([hidden])').count(), 8);
+  await full.getByRole('textbox', { name: '自定义线路' }).fill('cn-hk-eq-bcache-01.bilivideo.com');
+  await full.getByRole('button', { name: '添加' }).click();
+  assert.equal((await full.locator('#custom-error').textContent()).trim(), '最多添加 8 条自定义线路。');
+  assert.equal((await sent(full, 'config')).length, 0);
   const blocked = await open(t, { hash: 'routes', overrides: { availability: { reason: 'region' } } });
   assert.equal(await blocked.locator('.radios').evaluate(node => node.inert), true);
   const off = await open(t, { hash: 'settings', settings: { enabled: false } });

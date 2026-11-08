@@ -31,14 +31,16 @@ const app = {
   busy: key => busy.has(key),
   motionOn: () => conn.state.motion && !reduced.matches && !document.hidden,
   name: host => format.serverName(host, lang),
-  // Every server the user can pin: the allowed list plus the custom host they added, as in the floating menu.
+  // Every server the user can pin: the built-in list, the user's own servers as edited here (a save may still be
+  // pending), and a fixed host from before the list existed, as in the floating menu.
   hosts() {
-    const list = [...(conn.state.snapshot?.allowedHosts || settings.fixedHosts)];
-    const config = app.config;
+    const config = app.config, own = app.own();
+    const list = [...(conn.state.snapshot?.allowedHosts || settings.fixedHosts).filter(host => settings.fixedHosts.includes(host)), ...own];
     if (settings.isCdnHost(config.pcdnHost) && !list.includes(config.pcdnHost)) list.push(config.pcdnHost);
     return list;
   },
-  save, choose, act, go, toast, confirm, test, render: queueRender,
+  own: () => Array.isArray(app.config.customHosts) ? app.config.customHosts : [],
+  save, choose, act, go, toast, confirm, test, addHost, removeHost, render: queueRender,
   setMotion: async value => { try { await conn.setMotion(value); toast(t('saved'), 'ok'); } catch { toast(t('saveFailed'), 'bad'); } queueRender(); },
   exportDiagnostics, clearLog
 };
@@ -62,6 +64,20 @@ function choose(choice) {
   if (choice === 'auto') return save({ enabled: true, selection: 'auto', mode: app.config.mode === 'off' ? 'bad-only' : app.config.mode });
   if (choice === 'default') return save({ enabled: false });
   if (settings.isCdnHost(choice)) return save({ host: choice }, { action: 'applyRoute' });
+}
+// A user's server joins the saved list and automatic racing; the current choice stays. 'full' when the list is full.
+function addHost(host) {
+  const own = app.own();
+  if (settings.fixedHosts.includes(host) || own.includes(host)) return 'listed';
+  if (own.length >= settings.customHostsMax) return 'full';
+  save({ customHosts: [...own, host] });
+  return 'added';
+}
+// A removed server is no longer used anywhere: when it was the fixed server, Automatic takes over.
+function removeHost(host) {
+  const patch = { customHosts: app.own().filter(item => item !== host) };
+  if (app.config.pcdnHost === host) Object.assign(patch, { selection: 'auto', pcdnHost: settings.defaults.pcdnHost });
+  return save(patch);
 }
 // The dashboard's own failed edit, or an empty patch: the video page then sends its failed edit again.
 function retrySave() {

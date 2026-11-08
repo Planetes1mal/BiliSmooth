@@ -1,6 +1,6 @@
 // Servers: one radio list (Automatic, Bilibili default, then every server with its measured speed,
-// first byte and test age), a custom upos host, "when to replace" for a fixed server, Test speed,
-// Clear speed data, and this video's tests and switches.
+// first byte and test age; the user's own servers can be removed), adding a server, "when to replace"
+// for a fixed server, Test speed, Clear speed data, and this video's tests and switches.
 import settings from '../../../core/settings.js';
 import * as format from '../../shared/format.js';
 import { icon } from '../../shared/icons.js';
@@ -29,8 +29,8 @@ export function createServers(section, app) {
   const radios = h('div.radios', { role: 'radiogroup', 'data-t-label': 'servers' }, auto, fallback, h('p.grouplabel', { 'data-t': 'fixedGroup' }), header, list);
 
   const input = h('input.input', { type: 'text', spellcheck: 'false', autocomplete: 'off', 'data-t-placeholder': 'customPlaceholder', 'data-t-label': 'customServer',
-    'aria-describedby': 'custom-error', oninput: () => invalid(false) });
-  const error = h('p.field-error', { id: 'custom-error', 'data-t': 'badHost', hidden: true });
+    'aria-describedby': 'custom-error', oninput: () => invalid(null) });
+  const error = h('p.field-error', { id: 'custom-error', hidden: true });
   const form = h('form.addrow', { onsubmit: event => { event.preventDefault(); addCustom(); } }, input, h('button.btn', { type: 'submit', 'data-t': 'addCustom' }));
   const mode = segmented([['bad-only', 'replaceSlow'], ['force', 'replaceAlways']], value => app.save({ mode: value }), 'replaceWhen');
   const when = h('div.line.when', h('b', { 'data-t': 'replaceWhen' }), mode.node);
@@ -39,29 +39,42 @@ export function createServers(section, app) {
   stack.append(h('section.card.servers', radios, form, error, when, h('div.list-foot', h('span'), clear)),
     h('section.card', h('div.card-head', h('h2', { 'data-t': 'history' })), records));
   const rows = new Map();
-  let recordsKey = '';
+  let recordsKey = '', errorKey = null, ids = 0;
 
-  function invalid(on) {
-    input.classList.toggle('bad', on); show(error, on);
-    if (on) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+  function invalid(key) {
+    errorKey = key;
+    input.classList.toggle('bad', !!key); show(error, !!key);
+    if (key) { input.setAttribute('aria-invalid', 'true'); text(error, app.t(key, { n: settings.customHostsMax })); }
+    else input.removeAttribute('aria-invalid');
   }
+  // Adding keeps the current server choice; the new server joins the list and automatic racing.
   function addCustom() {
-    if (!settings.isCdnHost(input.value)) { invalid(true); input.focus(); return; }
     const host = settings.patch({ pcdnHost: input.value }).pcdnHost;
+    if (!host) { invalid('badHost'); input.focus(); return; }
+    if (app.addHost(host) === 'full') { invalid('customFull'); input.focus(); return; }
     input.value = '';
-    app.choose(host);
   }
 
   function hostRow(host) {
     const radio = h('input', { type: 'radio', name: 'server', value: host, onchange: () => radio.checked && app.choose(host) });
-    const node = h('label.ropt', { dataset: { choice: host } }, radio, h('span.radio'), h('div', h('b'), h('small', host)),
-      h('span.bar', h('i')), h('span.num.speed'), h('span.num.muted.ttfb'), h('span.tagcell'));
+    const id = 'server-' + ++ids;
+    // A button inside the row's label: it sits above the row's radio and never selects the row.
+    const remove = h('button.remove', { type: 'button', hidden: true, onclick: event => { event.preventDefault(); event.stopPropagation(); app.removeHost(host); } });
+    remove.innerHTML = icon('close');
+    const node = h('label.ropt', { dataset: { choice: host } }, radio, h('span.radio'), h('div', h('b', { id: id + '-name' }), h('small', { id: id + '-host' }, host)),
+      h('span.bar', h('i')), h('span.num.speed'), h('span.num.muted.ttfb'), h('span.tagcell', h('span.tag'), remove));
+    node.dataset.id = id;
     rows.set(host, node);
     return node;
   }
   function renderRow(node, host, measured, serving, slowBelow, ceiling) {
     const { t } = app;
     text(node.querySelector('b'), app.name(host));
+    const own = app.own().includes(host), remove = node.querySelector('.remove'), radio = node.querySelector('input');
+    remove.hidden = !own;
+    if (own) remove.setAttribute('aria-label', t('removeServer', { name: app.name(host) }));
+    // The remove button's name stays out of the radio's name.
+    if (own) radio.setAttribute('aria-labelledby', node.dataset.id + '-name ' + node.dataset.id + '-host'); else radio.removeAttribute('aria-labelledby');
     const mb = finite(measured?.goodputBps) ? measured.goodputBps / 8e6 : null, rate = format.megabytes(mb);
     const bar = node.querySelector('.bar');
     bar.classList.toggle('none', mb === null);
@@ -73,7 +86,7 @@ export function createServers(section, app) {
     text(speed, rate ? rate.value + ' ' + rate.unit : measured ? '—' : t('notTested'));
     speed.classList.toggle('muted', !rate);
     text(node.querySelector('.ttfb'), finite(measured?.ttfbMedianMs) ? t('ms', { n: Math.round(measured.ttfbMedianMs) }) : '—');
-    const cell = node.querySelector('.tagcell'), key = serving ? 'serving|' + app.lang : 'age|' + (format.age(measured?.measuredAt, t) || '—');
+    const cell = node.querySelector('.tag'), key = serving ? 'serving|' + app.lang : 'age|' + (format.age(measured?.measuredAt, t) || '—');
     if (cell.dataset.key !== key) {
       cell.dataset.key = key;
       cell.replaceChildren(serving ? h('span.serving', t('serving')) : h('span.age', key.slice(4)));
@@ -116,6 +129,7 @@ export function createServers(section, app) {
     // Changing servers cannot help a blocked video; the floating control says the same.
     const blocked = connected && !!view.availability;
     radios.inert = form.inert = when.inert = blocked;
+    if (errorKey) text(error, t(errorKey, { n: settings.customHostsMax }));
     show(when, choice !== 'auto' && choice !== 'default');
     mode.set(config.mode === 'force' ? 'force' : 'bad-only');
     clear.disabled = !connected || app.busy('reset');
@@ -135,5 +149,5 @@ export function createServers(section, app) {
       return h('div.rec', h('time', format.clock(row.at)), h('span', h('span.what', t(race ? 'historyTest' : 'historySwitch')), hostsText), h('span.out', out));
     }) : [h('p.empty', t('historyEmpty'))]));
   }
-  return { render, translate() { recordsKey = ''; for (const node of rows.values()) node.querySelector('.tagcell').dataset.key = ''; } };
+  return { render, translate() { recordsKey = ''; for (const node of rows.values()) node.querySelector('.tag').dataset.key = ''; } };
 }
