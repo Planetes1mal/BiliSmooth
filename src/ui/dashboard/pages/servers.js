@@ -1,10 +1,10 @@
 // Servers: one radio list (Automatic, Bilibili default, then every server with its measured speed,
-// first byte and test age; the user's own servers can be removed), adding a server, "when to replace"
+// likely quality, first byte and test age; the user's own servers can be removed), adding a server, "when to replace"
 // for a fixed server, Test speed, Clear speed data, and this video's tests and switches.
 import settings from '../../../core/settings.js';
 import * as format from '../../shared/format.js';
 import { icon } from '../../shared/icons.js';
-import { serverChoice, testResult, testBlocker } from '../../shared/playback.js';
+import { serverChoice, testResult, testBlocker, videoQualities, qualityFit } from '../../shared/playback.js';
 import { h, text, show } from '../dom.js';
 import { ceilingFor } from '../chart.js';
 import { T, segmented } from './parts.js';
@@ -62,12 +62,12 @@ export function createServers(section, app) {
     const remove = h('button.remove', { type: 'button', hidden: true, onclick: event => { event.preventDefault(); event.stopPropagation(); app.removeHost(host); } });
     remove.innerHTML = icon('close');
     const node = h('label.ropt', { dataset: { choice: host } }, radio, h('span.radio'), h('div', h('b', { id: id + '-name' }), h('small', { id: id + '-host' }, host)),
-      h('span.bar', h('i')), h('span.num.speed'), h('span.num.muted.ttfb'), h('span.tagcell', h('span.tag'), remove));
+      h('span.bar', h('i')), h('div', h('span.num.speed'), h('small.fit')), h('span.num.muted.ttfb'), h('span.tagcell', h('span.tag'), remove));
     node.dataset.id = id;
     rows.set(host, node);
     return node;
   }
-  function renderRow(node, host, measured, serving, slowBelow, ceiling) {
+  function renderRow(node, host, measured, serving, qualities, playbackRate, ceiling) {
     const { t } = app;
     text(node.querySelector('b'), app.name(host));
     const own = app.own().includes(host), remove = node.querySelector('.remove'), radio = node.querySelector('input');
@@ -78,13 +78,15 @@ export function createServers(section, app) {
     const mb = finite(measured?.goodputBps) ? measured.goodputBps / 8e6 : null, rate = format.megabytes(mb);
     const bar = node.querySelector('.bar');
     bar.classList.toggle('none', mb === null);
-    if (mb !== null) {
-      bar.firstChild.style.width = Math.min(100, mb / ceiling * 100).toFixed(1) + '%';
-      bar.firstChild.classList.toggle('slow', finite(slowBelow) && mb * 8e6 < slowBelow);
-    }
+    if (mb !== null) bar.firstChild.style.width = Math.min(100, mb / ceiling * 100).toFixed(1) + '%';
     const speed = node.querySelector('.speed');
     text(speed, rate ? rate.value + ' ' + rate.unit : measured ? '—' : t('notTested'));
     speed.classList.toggle('muted', !rate);
+    // Warn when the speed likely falls short of the quality being played, or of every quality.
+    const fit = qualityFit(measured?.goodputBps, qualities, playbackRate), name = fit?.quality && format.qualityName(fit.quality, app.lang);
+    const label = node.querySelector('.fit');
+    text(label, !fit ? '—' : !fit.quality ? t('mayStutter') : name ? t('qualityFit', { q: name }) : '—');
+    label.classList.toggle('warn', !!fit?.short);
     text(node.querySelector('.ttfb'), finite(measured?.ttfbMedianMs) ? t('ms', { n: Math.round(measured.ttfbMedianMs) }) : '—');
     const cell = node.querySelector('.tag'), key = serving ? 'serving|' + app.lang : 'age|' + (format.age(measured?.measuredAt, t) || '—');
     if (cell.dataset.key !== key) {
@@ -110,13 +112,13 @@ export function createServers(section, app) {
     const speedOf = host => finite(measured.get(host)?.goodputBps) ? measured.get(host).goodputBps : null;
     const rank = host => speedOf(host) !== null ? 0 : measured.has(host) ? 1 : 2;
     const hosts = app.hosts().map((host, index) => ({ host, index })).sort((a, b) => rank(a.host) - rank(b.host) || (speedOf(b.host) || 0) - (speedOf(a.host) || 0) || a.index - b.index);
-    const slowBelow = connected && finite(view.session?.requiredBps) && view.session.requiredBps > 0 ? view.session.requiredBps * (finite(view.rate) ? view.rate : 1) : null;
+    const qualities = connected ? videoQualities(view.session) : [];
     // Bars share one stepped scale, so the fastest server never overflows and the rest stay comparable.
     const ceiling = ceilingFor(hosts.map(({ host }) => speedOf(host) === null ? null : speedOf(host) / 8e6));
     let cursor = list.firstElementChild;
     for (const { host } of hosts) {
       const node = rows.get(host) || hostRow(host);
-      renderRow(node, host, measured.get(host), connected && view.actualHost === host, slowBelow, ceiling);
+      renderRow(node, host, measured.get(host), connected && view.actualHost === host, qualities, view?.rate, ceiling);
       if (node !== cursor) list.insertBefore(node, cursor); else cursor = cursor.nextElementSibling;
     }
     for (const [host, node] of rows) if (!hosts.some(item => item.host === host)) { node.remove(); rows.delete(host); }

@@ -40,6 +40,7 @@ function installStub({ version, hosts, scenario, config }) {
       session: { cid: 1, requiredBps: 12e6, switchCount: 1,
         hosts: [{ host: hw, goodputBps: 1.62 * 8e6, ttfbMedianMs: 388, measuredAt: at(180) }, { host: cos, goodputBps: 5.12 * 8e6, ttfbMedianMs: 182, measuredAt: at(4) },
           { host: ali, goodputBps: 4.4 * 8e6, ttfbMedianMs: 214, measuredAt: at(40) }],
+        representations: [[120, 12e6, true], [80, 3e6, false], [64, 1.5e6, false]].map(([id, bandwidth, requested]) => ({ id, kind: 'video', bandwidth, height: 0, codecId: 12, requested })),
         races: [{ at: at(61), currentHost: cos, contenders: [ali, hw], verdict: 'current-fastest' }],
         switches: [{ at: at(138), fromHost: hw, toHost: cos, scope: 'video' }, { at: at(149), fromHost: hw, toHost: ali, scope: 'fragment' }] },
       speedSamples,

@@ -57,3 +57,13 @@ export function serverName(host, lang) {
   const known = providers[label];
   return known ? known[lang === 'en' ? 1 : 0] : label;
 }
+
+// Bilibili's short names for its video quality numbers; an unknown number reads by its height, or null.
+const qualities = { 127: '8K', 126: ['杜比视界', 'Dolby Vision'], 125: 'HDR', 120: '4K', 116: '1080P60', 112: '1080P+', 80: '1080P',
+  74: '720P60', 64: '720P', 32: '480P', 16: '360P', 6: '240P' };
+export function qualityName(row, lang) {
+  const known = qualities[row?.id];
+  if (known) return Array.isArray(known) ? known[lang === 'en' ? 1 : 0] : known;
+  const height = row?.height;
+  return finite(height) && height > 0 ? height >= 4320 ? '8K' : height >= 2160 ? '4K' : Math.round(height) + 'P' : null;
+}

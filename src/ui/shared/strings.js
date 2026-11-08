@@ -31,6 +31,7 @@ export const strings = Object.freeze({
   startSwitch: ['开播时用测得最快的线路', 'Start on the fastest tested server'],
   replaceWhen: ['什么时候替换', 'When to replace'], replaceSlow: ['只在变慢时', 'Only when slow'], replaceAlways: ['始终', 'Always'],
   firstByte: ['首字节', 'First byte'], tested: ['测速时间', 'Tested'],
+  qualityFit: ['预计够 {q}', 'Up to {q}'], mayStutter: ['可能卡顿', 'May stutter'],
 
   // Speed tests
   test: ['测速', 'Test speed'], testing: ['正在测速…', 'Testing…'], cooldown: ['{n} 秒后可再测', 'Test again in {n} s'],

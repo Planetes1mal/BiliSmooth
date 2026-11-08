@@ -25,7 +25,7 @@ export function create({ pool = settings.candidatePool } = {}) {
       if (!urls.size) continue;
       let session = sessions.get(file.cid);
       if (!session) { session = { cid: file.cid, requiredBps: 0, requestedVideo: null, representations: new Map() }; sessions.set(file.cid, session); }
-      session.representations.set(file.key, { ...file, id: track.id, kind: track.kind, bandwidth: track.bandwidth,
+      session.representations.set(file.key, { ...file, id: track.id, kind: track.kind, bandwidth: track.bandwidth, height: track.height,
         codecs: track.codecs, codecId: track.codecId, nativeHost: policy.describe(track.url).host, urls });
       currentCid = file.cid;
     }
@@ -59,8 +59,8 @@ export function create({ pool = settings.candidatePool } = {}) {
   function snapshot() {
     const session = current();
     return session ? { cid: session.cid, requiredBps: session.requiredBps,
-      representations: [...session.representations.values()].map(rep => ({ id: rep.id, kind: rep.kind, bandwidth: rep.bandwidth,
-        codecs: rep.codecs, codecId: rep.codecId, issuedHosts: [...rep.urls.keys()] })) } : null;
+      representations: [...session.representations.values()].map(rep => ({ id: rep.id, kind: rep.kind, bandwidth: rep.bandwidth, height: rep.height,
+        codecs: rep.codecs, codecId: rep.codecId, requested: rep.key === session.requestedVideo, issuedHosts: [...rep.urls.keys()] })) } : null;
   }
   return { collect, request, addressForHost, candidates, get, current, snapshot };
 }

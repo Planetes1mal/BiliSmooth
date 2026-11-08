@@ -185,7 +185,7 @@ svg.chart .end { fill: var(--accent-strong); stroke: var(--surface); stroke-widt
 .servers { padding: 12px 10px 16px; }
 .radios { display: grid; gap: 2px; }
 .hostrows { display: grid; gap: 2px; }
-.ropt { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) 120px 96px 88px 120px; gap: 14px; align-items: center; min-height: 58px; padding: 6px 14px; border-radius: var(--r); cursor: pointer; }
+.ropt { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) 96px 120px 88px 120px; gap: 14px; align-items: center; min-height: 58px; padding: 6px 14px; border-radius: var(--r); cursor: pointer; }
 .ropt:hover { background: color-mix(in srgb, var(--surface) 96%, var(--ink)); }
 .ropt.wide { grid-template-columns: 22px minmax(0, 1fr) auto; }
 .ropt.sel, .ropt.sel:hover { background: var(--accent-soft); }
@@ -201,7 +201,7 @@ svg.chart .end { fill: var(--accent-strong); stroke: var(--surface); stroke-widt
 .ropt .remove .ic { width: 16px; height: 16px; }
 .ropt .bar { height: 6px; border-radius: 3px; background: var(--soft); overflow: hidden; }
 .ropt .bar i { display: block; height: 100%; border-radius: 3px; background: var(--ok-dot); }
-.ropt .bar i.slow { background: var(--warn-dot); }
+.ropt .fit.warn { color: var(--warn); }
 .ropt .bar.none { visibility: hidden; }
 .ropt.sel .bar { background: var(--surface); }
 .ropt .radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--track); background: var(--surface); }

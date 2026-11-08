@@ -18,7 +18,8 @@ const playing = { present: true, playback: 'playing', frameHealth: { state: 'hea
 const state = { status: 'smooth', startupReady: true, hidden: false, availability: null, settingsSave: { status: 'saved' }, needReload: false, reloadReasons: [],
   media: playing, rate: 1, buffer: 30, bufferWallSeconds: 30, actualHost: cos, requestedHost: cos, lastMbps: 40, allowedHosts: [cos, ali, hw],
   delivery: { status: 'native', canTest: true, nextTestAt: 0 }, startup: { playinfoToFirstFrameMs: 900 }, counters: { stalls: 0, recoveries: 0 },
-  session: { hosts: [{ host: cos, goodputBps: 40e6, ttfbMedianMs: 120, measuredAt: null }], races: [], switches: [] }, speedSamples: [], events: [] };
+  session: { hosts: [{ host: cos, goodputBps: 40e6, ttfbMedianMs: 120, measuredAt: null }], races: [], switches: [],
+    representations: [{ id: 80, kind: 'video', bandwidth: 2e6, height: 1080, codecs: 'hev1', codecId: 12, requested: true, issuedHosts: [cos] }] }, speedSamples: [], events: [] };
 
 let browser;
 before(async () => { browser = await chromium.launch({ headless: true, args: ['--mute-audio'] }); });
@@ -126,8 +127,21 @@ test('unknown values read as — and untested servers stay untested', async t =>
   await page.locator('.nav a[data-page="routes"]').click();
   assert.deepEqual(await page.locator('.hostrows .speed').allTextContents(), ['未测速', '未测速', '未测速']);
   assert.deepEqual(await page.locator('.hostrows .ttfb').allTextContents(), ['—', '—', '—']);
+  assert.deepEqual(await page.locator('.hostrows .fit').allTextContents(), ['—', '—', '—']);
   await page.locator('.nav a[data-page="logs"]').click();
   assert.deepEqual((await page.locator('.stats strong').allTextContents()).map(value => value.trim()), ['—', '—', '—']);
+});
+
+test('each measured server names the best quality of this video its speed likely covers', async t => {
+  const video = (id, bandwidth, requested = false) => ({ id, kind: 'video', bandwidth, height: 0, codecId: 12, requested });
+  const session = { races: [], switches: [], representations: [video(120, 12e6), video(80, 2e6, true), video(64, 1e6)],
+    hosts: [{ host: cos, goodputBps: 18e6 }, { host: ali, goodputBps: 3e6 - 1 }, { host: hw, goodputBps: 1e6 }] };
+  const labels = page => page.locator('.hostrows .fit').evaluateAll(nodes => nodes.map(node => [node.textContent, node.classList.contains('warn')]));
+  // 1.5× headroom over bit rate × rate; amber when the 1080P being played is not covered.
+  const normal = await open(t, { hash: 'routes', overrides: { session } });
+  assert.deepEqual(await labels(normal), [['预计够 4K', false], ['预计够 720P', true], ['可能卡顿', true]]);
+  const fast = await open(t, { hash: 'routes', overrides: { session, rate: 2 }, settings: { lang: 'en' } });
+  assert.deepEqual(await labels(fast), [['Up to 1080P', false], ['May stutter', true], ['May stutter', true]]);
 });
 
 test('theme, accent and language apply at once and are saved', async t => {

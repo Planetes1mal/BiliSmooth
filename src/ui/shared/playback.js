@@ -65,3 +65,33 @@ export function testBlocker(view, t, now = Date.now()) {
   if (wait > 0) return t('cooldown', { n: wait });
   return delivery?.canTest ? null : t('testUnavailable');
 }
+
+// A measured speed must reach a quality's bit rate × playback rate × this margin before it is called likely enough:
+// above the kernel's 1.3× stuck margin, with room for audio and bit-rate peaks. A race reads at most 768 KiB, so
+// the result is an estimate, never a promise.
+export const QUALITY_HEADROOM = 1.5;
+
+// The current video's DASH qualities, best first: one row { id, height, bandwidth, current } per Bilibili quality
+// number. A quality takes the bit rate of the codec the player requested last, or its highest bit rate when that
+// codec does not offer it or nothing was requested yet. Empty when unknown.
+export function videoQualities(session) {
+  const files = (Array.isArray(session?.representations) ? session.representations : [])
+    .filter(rep => rep?.kind === 'video' && finite(rep.id) && finite(rep.bandwidth) && rep.bandwidth > 0);
+  const codec = files.find(rep => rep.requested)?.codecId ?? null, rows = new Map();
+  for (const rep of files) {
+    const known = rows.get(rep.id), same = codec !== null && rep.codecId === codec;
+    if (!known || same && !known.same || same === known.same && rep.bandwidth > known.bandwidth) rows.set(rep.id, { rep, same });
+  }
+  return [...rows.values()].map(({ rep }) => ({ id: rep.id, height: finite(rep.height) && rep.height > 0 ? rep.height : null,
+    bandwidth: rep.bandwidth, current: files.some(file => file.requested && file.id === rep.id) })).sort((a, b) => b.id - a.id);
+}
+
+// What a measured speed is likely enough for at this playback rate: { quality, short }, where quality is the best
+// row it covers with headroom (null: likely to stutter even at the lowest) and short says it does not cover the
+// quality being played. Null when the speed or the qualities are unknown.
+export function qualityFit(goodputBps, qualities, rate) {
+  if (!finite(goodputBps) || goodputBps < 0 || !Array.isArray(qualities) || !qualities.length) return null;
+  const need = (finite(rate) && rate > 0 ? rate : 1) * QUALITY_HEADROOM, covers = row => goodputBps >= row.bandwidth * need;
+  const quality = qualities.find(covers) || null, current = qualities.find(row => row.current);
+  return { quality, short: !quality || !!current && !covers(current) };
+}

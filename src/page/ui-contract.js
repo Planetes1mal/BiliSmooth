@@ -30,6 +30,8 @@ export const SAVING_COMMANDS = Object.freeze(['config', 'applyRoute', 'clearData
 // counters { stalls, frameStalls, recoveries, switches, bytes, videoBytes, audioBytes, totalStallMs }, recoveryAttempts,
 // session.hosts[] also carries measuredAt: the wall time of that host's last measured fragment (null when unknown),
 // session.startHost is the host regional history started the video on (null when it started on Bilibili's address),
+// session.representations[] is { id, kind, bandwidth, height, codecs, codecId, requested, issuedHosts } per file of the current video:
+// for DASH video, id is Bilibili's quality number and bandwidth its declared bit rate; requested marks the video file the player asked for last,
 // audioHost, networkEpoch, speedSamples, sampledAt, events (recent log rows).
 export function createRuntimeContract({ version, document, now, wallNow, settings, sync, observer, meta, speed, transfers, episodes, startup, events, kernel, listeners, clone, notify, actions }) {
   function view() {
