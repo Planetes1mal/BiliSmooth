@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-accent="blue"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BiliSmooth</title><link rel="icon" href="../icons/32.png"><link rel="stylesheet" href="app.css">
+<script src="../motion-runtime.js"></script><script src="app.js" defer></script></head>
+<body>
+<a class="skip" href="#main" data-t="skip"></a>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="tile" data-icon="mark"></span>BiliSmooth</div>
+    <nav class="nav" data-t-label="navigation">
+      <a href="#overview" data-page="overview"><span data-icon="overview"></span><span data-t="overview"></span></a>
+      <a href="#routes" data-page="routes"><span data-icon="servers"></span><span data-t="servers"></span></a>
+      <a href="#settings" data-page="settings"><span data-icon="settings"></span><span data-t="settings"></span></a>
+      <a href="#logs" data-page="logs"><span data-icon="log"></span><span data-t="log"></span></a>
+    </nav>
+    <div class="live-speed"><span data-t="liveSpeed"></span><strong id="live-speed"></strong><svg class="chart mini" id="live-chart" aria-hidden="true"></svg></div>
+    <div class="foot"><span data-t="runsLocally"></span><span id="version"></span></div>
+  </aside>
+  <main class="main" id="main" tabindex="-1">
+    <div class="topbar">
+      <div class="picker-wrap" id="picker"></div>
+      <span class="grow"></span>
+      <button class="btn primary" id="back" type="button" hidden><span data-icon="play"></span><span data-t="back"></span></button>
+    </div>
+    <div class="notice" id="notice" role="status" hidden><span class="nic"></span><div><b></b><p></p></div></div>
+    <section class="page" data-page="overview" hidden><div class="head"><h1 data-t="overview" tabindex="-1"></h1></div><div class="stack"></div></section>
+    <section class="page" data-page="routes" hidden><div class="head"><h1 data-t="servers" tabindex="-1"></h1></div><div class="stack"></div></section>
+    <section class="page" data-page="settings" hidden><div class="head"><h1 data-t="settings" tabindex="-1"></h1></div><div class="stack prefs"></div></section>
+    <section class="page" data-page="logs" hidden><div class="head"><h1 data-t="log" tabindex="-1"></h1></div><div class="stack"></div></section>
+  </main>
+</div>
+<dialog class="dialog" id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
+  <h2 id="confirm-title"></h2><p id="confirm-detail"></p>
+  <div class="dacts"><button class="btn" type="button" value="cancel" data-t="cancel"></button><button class="btn dangerfill" type="button" value="ok"></button></div>
+</dialog>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body></html>

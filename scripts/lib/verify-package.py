@@ -85,8 +85,8 @@ def verify(version):
             assert content.startswith(b'\x89PNG\r\n\x1a\n')
             assert struct.unpack('>II', content[16:24]) == (size, size)
             dimensions[str(size)] = [size, size]
-        assert package.read('control/tabler-LICENSE.txt') == local('src/ui/control/tabler-LICENSE.txt').read_bytes()
-        assert package.read('control/motion-LICENSE.txt') == local('src/ui/control/motion-LICENSE.txt').read_bytes()
+        assert package.read('control/tabler-LICENSE.txt') == local('src/ui/dashboard/tabler-LICENSE.txt').read_bytes()
+        assert package.read('control/motion-LICENSE.txt') == local('src/ui/dashboard/motion-LICENSE.txt').read_bytes()
         assert b'MIT' in package.read('control/motion-LICENSE.txt')
         assert package.read('motion-runtime.js') == local('src/ui/motion-runtime.js').read_bytes()
         assert b'BiliSmoothMotion' in package.read('motion-runtime.js')

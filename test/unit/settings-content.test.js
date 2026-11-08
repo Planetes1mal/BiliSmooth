@@ -74,6 +74,14 @@ test('one-time migration preserves old preferences and rollback records without 
   assert.deepEqual(h.store['prior.preferences'], legacy);
 });
 
+test('earlier accent and entry choices map to their new equivalent or reset; playback settings are untouched', () => {
+  const old = settings.normalize({ enabled: false, selection: 'fixed', pcdnHost: settings.candidatePool[2], mode: 'force', theme: 'dark', accent: 'bili', floatingEntryType: 'status-logo', floatingFields: ['speed'] });
+  assert.equal(old.accent, 'blue'); assert.equal(old.floatingEntryType, 'icon'); assert.equal('floatingFields' in old, false);
+  assert.deepEqual([old.enabled, old.selection, old.pcdnHost, old.mode, old.theme], [false, 'fixed', settings.candidatePool[2], 'force', 'dark']);
+  assert.equal(settings.normalize({ accent: 'violet', floatingEntryType: 'resolution' }).accent, 'blue');
+  assert.equal(settings.normalize({ accent: 'violet', floatingEntryType: 'resolution' }).floatingEntryType, 'icon');
+});
+
 test('saved Akamai fixed routes migrate to automatic selection and cannot be selected again', async () => {
   for (const [key, host] of [[migration.key, 'upos-hz-mirrorakam.akamaized.net'], ['prior.preferences', 'upos-sz-mirrorakam.akamaized.net']]) {
     const saved = { enabled: true, selection: 'fixed', pcdnHost: host, lang: 'en' };

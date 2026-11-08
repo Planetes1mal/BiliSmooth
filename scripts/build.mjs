@@ -1,7 +1,7 @@
 // Builds dist/extension: the MAIN-world bundle (core + page modules by esbuild, then the UI
 // scripts appended as classic scripts), the classic settings scripts for content.js and
 // background.js, the dashboard files and the packaged documents.
-import { mkdir, readFile, writeFile, readdir, rename, lstat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, lstat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -21,16 +21,16 @@ const motionInputs = await buildMotion();
 const sourceSha256 = {};
 async function bundle(entry, globalName) {
   const result = await build({ absWorkingDir: root, entryPoints: [entry], bundle: true, format: 'iife', platform: 'browser',
-    target: ['chrome120'], write: false, metafile: true, legalComments: 'none', charset: 'utf8',
+    target: ['chrome120'], write: false, metafile: true, legalComments: 'none', charset: 'utf8', loader: { '.css': 'text', '.svg': 'text' },
     ...(globalName ? { globalName } : {}), define: { __BILISMOOTH_VERSION__: JSON.stringify(pkg.version) } });
   for (const input of Object.keys(result.metafile.inputs)) sourceSha256[input] = hash(await readFile(inside(input)));
   return result.outputFiles[0].text;
 }
-// The UI scripts stay classic scripts after the bundle; they read the globals the bundle publishes.
-const uiFiles = ['src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js', 'src/page/floating-control.js'];
-const uiBytes = await Promise.all(uiFiles.map(file => readFile(inside(file))));
-uiFiles.forEach((file, index) => { sourceSha256[file] = hash(uiBytes[index]); });
-const playback = await bundle('src/page/main.js') + '\n' + uiBytes.map(bytes => bytes.toString()).join('\n');
+// The floating control runs after the core in the same MAIN-world file: Motion first (a classic script that
+// publishes BiliSmoothMotion), then the floating bundle, which reads BiliSmoothRuntime and BiliSmoothSettings.
+const motionBytes = await readFile(inside('src/ui/motion-runtime.js'));
+sourceSha256['src/ui/motion-runtime.js'] = hash(motionBytes);
+const playback = await bundle('src/page/main.js') + '\n' + motionBytes.toString() + '\n' + await bundle('src/ui/floating/index.js');
 const outputs = new Map([['playback.js', Buffer.from(playback)]]);
 outputs.set('settings.js', Buffer.from(await bundle('src/core/settings.js', 'BiliSmoothSettings')));
 outputs.set('settings-migration.js', Buffer.from(await bundle('src/core/settings-migration.js', 'BiliSmoothSettingsMigration')));
@@ -47,14 +47,8 @@ for (const file of ['content.js', 'background.js']) await include('src/extension
 for (const locale of ['en', 'zh_CN'])
   await include(`src/extension/_locales/${locale}/messages.json`, `_locales/${locale}/messages.json`);
 const logoBytes = await readFile(inside('src/ui/icon.svg'));
-const inlineLogo = playback.match(/const logo = '([^']+)'/)?.[1];
-const logoShape = value => String(value).replace(/<title>[\s\S]*?<\/title>/g, '').replace(/<svg[^>]*>|<\/svg>/g, '').trim();
-if (!inlineLogo || logoShape(inlineLogo) !== logoShape(logoBytes.toString())) throw new Error('Floating and dashboard brand marks differ');
 const logoPath = `icon.${hash(logoBytes).slice(0, 12)}.svg`;
 await include('src/ui/icon.svg', logoPath);
-await include('src/ui/surface.js', 'surface.js');
-await include('src/ui/entry-display.js', 'entry-display.js');
-await include('src/ui/choice.js', 'choice.js');
 await include('src/ui/motion-runtime.js', 'motion-runtime.js');
 const iconPaths = {};
 for (const size of [16, 32, 48, 128]) {
@@ -65,17 +59,15 @@ for (const size of [16, 32, 48, 128]) {
 manifest.icons = iconPaths;
 manifest.action.default_icon = { ...iconPaths };
 outputs.set('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2) + '\n'));
-async function includeControl(relative = '') {
-  for (const entry of await readdir(inside('src/ui/control/' + relative), { withFileTypes: true })) {
-    const name = relative + entry.name;
-    if (entry.isSymbolicLink()) throw new Error('UI input cannot be a symlink: ' + name);
-    if (entry.isDirectory()) await includeControl(name + '/');
-    else if (/\.(?:js|css|html|svg|png|txt)$/.test(name)) await include('src/ui/control/' + name, 'control/' + name);
-    else throw new Error('Unexpected UI input: ' + name);
-  }
-}
-await includeControl();
-if (!outputs.has('control/index.html')) throw new Error('The primary control page is missing');
+// The dashboard: one bundle, one stylesheet (shared tokens first), the page and the third-party licenses.
+outputs.set('control/app.js', Buffer.from(await bundle('src/ui/dashboard/main.js')));
+const cssInputs = ['src/ui/shared/tokens.css', 'src/ui/dashboard/dashboard.css'];
+const cssBytes = await Promise.all(cssInputs.map(file => readFile(inside(file))));
+cssInputs.forEach((file, index) => { sourceSha256[file] = hash(cssBytes[index]); });
+outputs.set('control/app.css', Buffer.from(cssBytes.map(bytes => bytes.toString()).join('\n')));
+await include('src/ui/dashboard/index.html', 'control/index.html');
+await include('src/ui/dashboard/motion-LICENSE.txt', 'control/motion-LICENSE.txt');
+await include('src/ui/dashboard/tabler-LICENSE.txt', 'control/tabler-LICENSE.txt');
 const html = outputs.get('control/index.html').toString()
   .replace(/<meta\s+name=["']bilismooth-version["'][^>]*>/gi, '')
   .replace(/<head>/i, `<head>\n<meta name="bilismooth-version" content="${pkg.version}">`)

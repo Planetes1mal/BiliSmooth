@@ -6,13 +6,15 @@ export const candidatePool = Object.freeze([
   'upos-sz-mirrorhwb.bilivideo.com'
 ]);
 export const fixedHosts = candidatePool;
-export const accents = Object.freeze(['peach', 'bili', 'teal', 'emerald', 'violet', 'pink', 'sunset', 'graphite']);
-export const floatingEntryTypes = Object.freeze(['status-logo', 'logo', 'status', 'speed', 'buffer', 'combined', 'route', 'rate', 'resolution']);
+export const accents = Object.freeze(['blue', 'teal', 'green', 'orange', 'pink', 'graphite']);
+export const floatingEntryTypes = Object.freeze(['icon', 'buffer', 'speed', 'combined']);
+// Visual choices from earlier versions that still have a close equivalent; the rest fall back to the default.
+const legacyAccents = Object.freeze({ bili: 'blue', emerald: 'green', sunset: 'orange', peach: 'orange' });
+const legacyEntryTypes = Object.freeze({ 'status-logo': 'icon', logo: 'icon', status: 'icon' });
 export const defaults = Object.freeze({ schemaVersion: 4, enabled: true, selection: 'auto', mode: 'bad-only',
   pcdnHost: candidatePool[0], candidatePool, mcdnStrategy: 'proxy-all', proxyHost: 'proxy-tf-all-ws.bilivideo.com',
   portHeuristic: true, stallRecovery: true, rewriteAkamai: false, p2pGuard: false,
-  lang: 'zh', accent: 'teal', theme: 'system', floatingFields: Object.freeze(['status', 'speed', 'buffer']),
-  floatingEntryEnabled: true, floatingEntryType: 'status-logo', floatingEdgeSnap: true, maxDepth: 20 });
+  lang: 'zh', accent: 'blue', theme: 'system', floatingEntryType: 'icon', maxDepth: 20 });
 export const cacheKey = 'bilismooth.startup.v4';
 
 function cleanHost(raw) {
@@ -25,22 +27,21 @@ export function isCdnHost(raw) {
 }
 // Keeps only valid known fields of a partial settings object.
 export function patch(value) {
-  const input = value && typeof value === 'object' ? value : {}, result = {};
-  for (const key of ['enabled', 'portHeuristic', 'stallRecovery', 'rewriteAkamai', 'p2pGuard', 'floatingEntryEnabled', 'floatingEdgeSnap'])
+  const raw = value && typeof value === 'object' ? value : {}, result = {};
+  const input = { ...raw, accent: legacyAccents[raw.accent] || raw.accent, floatingEntryType: legacyEntryTypes[raw.floatingEntryType] || raw.floatingEntryType };
+  for (const key of ['enabled', 'portHeuristic', 'stallRecovery', 'rewriteAkamai', 'p2pGuard'])
     if (typeof input[key] === 'boolean') result[key] = input[key];
   for (const [key, values] of Object.entries({ selection: ['auto', 'fixed'], mode: ['off', 'bad-only', 'force'],
     mcdnStrategy: ['proxy-all', 'proxy-v1', 'replace'], lang: ['zh', 'en'], accent: accents, theme: ['system', 'light', 'dark'], floatingEntryType: floatingEntryTypes }))
     if (values.includes(input[key])) result[key] = input[key];
   if (isCdnHost(input.pcdnHost)) result.pcdnHost = cleanHost(input.pcdnHost);
   if (typeof input.proxyHost === 'string' && /^proxy-[a-z0-9-]+\.bilivideo\.(?:com|cn|net)$/.test(cleanHost(input.proxyHost))) result.proxyHost = cleanHost(input.proxyHost);
-  if (Array.isArray(input.floatingFields)) result.floatingFields = ['status', 'speed', 'buffer'].filter(field => input.floatingFields.includes(field));
   return result;
 }
 // A complete settings object: defaults plus the valid fields of the input.
 export function normalize(value) {
   const result = { ...defaults, ...patch(value), schemaVersion: 4, candidatePool: [...candidatePool], maxDepth: 20 };
   if (value?.selection === 'fixed' && /\.akamaized\.net$/.test(cleanHost(value.pcdnHost))) result.selection = 'auto';
-  result.floatingFields = [...result.floatingFields];
   return result;
 }
 const settings = Object.freeze({ defaults, normalize, patch, candidatePool, fixedHosts, accents, floatingEntryTypes, isCdnHost, cacheKey });

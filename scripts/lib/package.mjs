@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const allowedPath = /^(?:manifest\.json|BUILD\.json|playback\.js|content\.js|background\.js|_locales\/(?:en|zh_CN)\/messages\.json|icon\.[a-f0-9]{12}\.svg|surface\.js|entry-display\.js|motion-runtime\.js|choice\.js|settings(?:-migration)?\.js|LICENSE|NOTICE\.md|README(?:\.en)?\.md|PRIVACY(?:\.en)?\.md|CHANGELOG\.md|RELEASE\.md|docs\/licenses\/bilibili-accelerator-MIT\.txt|icons\/(?:16|32|48|128)\.[a-f0-9]{12}\.png|control\/[a-zA-Z0-9_./-]+\.(?:html|css|js|svg|png|txt))$/;
+const allowedPath = /^(?:manifest\.json|BUILD\.json|playback\.js|content\.js|background\.js|_locales\/(?:en|zh_CN)\/messages\.json|icon\.[a-f0-9]{12}\.svg|motion-runtime\.js|settings(?:-migration)?\.js|LICENSE|NOTICE\.md|README(?:\.en)?\.md|PRIVACY(?:\.en)?\.md|CHANGELOG\.md|RELEASE\.md|docs\/licenses\/bilibili-accelerator-MIT\.txt|icons\/(?:16|32|48|128)\.[a-f0-9]{12}\.png|control\/[a-zA-Z0-9_./-]+\.(?:html|css|js|svg|png|txt))$/;
 
 async function listFiles(folder, prefix = '') {
   const result = [];

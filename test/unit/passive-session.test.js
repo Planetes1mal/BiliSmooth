@@ -49,8 +49,8 @@ test('compact snapshot reads cached observations and delivery flags without cons
   const view = h.api.getViewState();
   assert.equal(view.media.present, true); assert.equal(view.bufferWallSeconds, 14.5);
   assert.equal(view.observedAt, 100000); assert.equal(view.events, undefined); assert.equal(view.session, undefined);
-  view.config.floatingFields.length = 0; view.media.frameHealth.state = 'modified';
-  assert.equal(h.api.getConfig().floatingFields.length, 3); assert.notEqual(h.api.getViewState().media.frameHealth.state, 'modified');
+  view.config.candidatePool.length = 0; view.media.frameHealth.state = 'modified';
+  assert.equal(h.api.getConfig().candidatePool.length, 9); assert.notEqual(h.api.getViewState().media.frameHealth.state, 'modified');
   h.kernelState.needReload = true; h.kernelState.delivery.status = 'testing';
   assert.equal(h.api.getViewState().needReload, true); assert.equal(h.api.getViewState().delivery.status, 'testing');
 });
@@ -80,13 +80,13 @@ test('site gates block manual recovery while preserving shared settings and auto
   }
 });
 
-test('acknowledged array preferences no longer mask a later authoritative update', async () => {
+test('acknowledged preferences no longer mask a later authoritative update', async () => {
   const h = harness(); h.message({ __bilismoothConfig: 'config', config: {} });
-  h.api.setConfig({ floatingFields: ['buffer'] });
+  h.api.setConfig({ floatingEntryType: 'buffer' });
   const save = h.messages.filter(row => row.__bilismoothConfig === 'save').at(-1);
   h.message({ __bilismoothConfig: 'saved', id: save.id, ok: true }); await h.api.flushSettings();
-  h.message({ __bilismoothConfig: 'config', config: { floatingFields: ['speed'] } });
-  assert.deepEqual(Array.from(h.api.getConfig().floatingFields), ['speed']);
+  h.message({ __bilismoothConfig: 'config', config: { floatingEntryType: 'speed' } });
+  assert.equal(h.api.getConfig().floatingEntryType, 'speed');
   assert.equal(h.api.getState().needReload, false);
 });
 
@@ -282,13 +282,13 @@ test('absence of an initial compositor baseline remains unknown and is not a fro
   assert.equal(h.api.getState().counters.frameStalls, 0);
 });
 test('control whitelist carries settings only after successful persistence', async () => {
-  const h = harness(); h.message({ __biliSmooth: 'request', id: 'advanced', action: 'config', patch: { mcdnStrategy: 'replace', p2pGuard: true, portHeuristic: false, rewriteAkamai: true, lang: 'en', accent: 'violet' } });
+  const h = harness(); h.message({ __biliSmooth: 'request', id: 'advanced', action: 'config', patch: { mcdnStrategy: 'replace', p2pGuard: true, portHeuristic: false, rewriteAkamai: true, lang: 'en', accent: 'teal' } });
   assert.equal(h.messages.some(row => row.id === 'advanced'), false);
   const save = h.messages.find(row => row.__bilismoothConfig === 'save');
   h.message({ __bilismoothConfig: 'saved', id: save.id, ok: true });
   await h.api.flushSettings(); await Promise.resolve();
   const response = h.messages.find(row => row.id === 'advanced'); assert.equal(response.ok, true);
-  assert.equal(response.result.config.mcdnStrategy, 'replace'); assert.equal(response.result.config.accent, 'violet');
+  assert.equal(response.result.config.mcdnStrategy, 'replace'); assert.equal(response.result.config.accent, 'teal');
   assert.equal(response.result.needReload, true);
 });
 
