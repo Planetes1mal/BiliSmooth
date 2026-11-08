@@ -39,6 +39,7 @@ export function describe(row, t, lang) {
       title = row.phase === 'retried' ? 'eventRetryObserved' : row.phase === 'disabled' ? 'eventRetryDisabled' : 'eventRetry';
       add(name(row.host)); break;
     case 'network-reset': category = 'server'; title = ['manual', 'clear-data'].includes(row.reason) || !row.reason ? 'cleared' : 'eventAssessment'; break;
+    case 'offline': category = 'problem'; title = 'eventOffline'; break;
     case 'settings-save-failed': category = 'problem'; title = 'saveFailed'; break;
     case 'settings-read-failed': category = 'problem'; title = 'readFailed'; break;
     case 'p2p-blocked': title = 'p2p'; break;

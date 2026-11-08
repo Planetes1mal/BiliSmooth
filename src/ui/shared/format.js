@@ -10,10 +10,13 @@ export function speed(view, now = Date.now()) {
   if (!finite(at) || age < -1000 || age > 3000 || !finite(view?.lastMbps) || view.lastMbps < 0) return null;
   return megabytes(view.lastMbps / 8);
 }
-// A rate in MB/s as { value, unit }.
+// A rate in MB/s as { value, unit }. Under 1 MB/s it reads in KB/s, with a decimal below 10 KB/s so a slow but
+// moving download never reads as 0; a rate that would round to 1000 KB/s reads as 1.00 MB/s.
 export function megabytes(mb) {
   if (!finite(mb) || mb < 0) return null;
-  return mb > 0 && mb < 1 ? { value: (mb * 1000).toFixed(0), unit: 'KB/s', mb } : { value: mb.toFixed(2), unit: 'MB/s', mb };
+  const kb = mb * 1000;
+  if (mb === 0 || kb >= 999.5) return { value: mb.toFixed(2), unit: 'MB/s', mb };
+  return { value: kb < 0.05 ? '<0.1' : kb < 10 ? kb.toFixed(1) : kb.toFixed(0), unit: 'KB/s', mb };
 }
 // Playable wall-clock seconds at the current playback rate.
 export function buffer(view) {

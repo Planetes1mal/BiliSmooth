@@ -7,7 +7,6 @@ import { projectPlayback, serverChoice, statusKeys } from '../../shared/playback
 import { h, text } from '../dom.js';
 import { T, segmented, toggle, line } from './parts.js';
 
-const swatches = { blue: '#2456D6', teal: '#0E7C86', green: '#2F7D4F', orange: '#B4531A', pink: '#C2185B', graphite: '#4A4F57' };
 const accentKeys = { blue: 'accentBlue', teal: 'accentTeal', green: 'accentGreen', orange: 'accentOrange', pink: 'accentPink', graphite: 'accentGraphite' };
 const entryKeys = { icon: 'entryIcon', buffer: 'entryBuffer', speed: 'entrySpeed', combined: 'entryCombined' };
 // The preview dot takes the real entry's tone, so Bilibili default reads idle here too.
@@ -38,7 +37,7 @@ export function createSettings(stack, app) {
   const accents = h('div.swatches', { role: 'radiogroup', 'data-t-label': 'accent' });
   const accentInputs = settings.accents.map(accent => {
     const input = h('input', { type: 'radio', name: 'accent', value: accent, 'data-t-label': accentKeys[accent], onchange: () => input.checked && app.save({ accent }) });
-    accents.append(h('label.sw', { style: `--c:${swatches[accent]}` }, input));
+    accents.append(h('label.sw', { style: `--c:var(--swatch-${accent})` }, input));
     return input;
   });
   accents.append(accentName);

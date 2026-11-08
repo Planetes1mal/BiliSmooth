@@ -266,7 +266,7 @@ svg.chart .end { fill: var(--accent-strong); stroke: var(--surface); stroke-widt
 /* Dialog and toast */
 .dialog { width: min(420px, calc(100vw - 32px)); padding: 24px; border: 0; border-radius: var(--r); background: var(--surface); color: var(--ink); box-shadow: var(--float); }
 .dialog[open] { display: grid; gap: 10px; }
-.dialog::backdrop { background: var(--scrim); }
+.dialog::backdrop { background: var(--scrim, rgb(24 25 28 / .45)); }
 .dialog h2 { font-size: 18px; font-weight: 600; }
 .dialog p { color: var(--muted); }
 .dacts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }

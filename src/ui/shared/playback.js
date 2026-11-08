@@ -49,7 +49,7 @@ export function testResult(view, t, name) {
   const delivery = view?.delivery;
   if (!delivery || delivery.status === 'native') return null;
   if (delivery.status === 'testing') return { key: 'testing', text: t('testing') };
-  const host = name(delivery.activeHost || view.actualHost || view.requestedHost) || '';
+  const host = name(delivery.activeHost || view.actualHost || view.requestedHost) || '—';
   if (delivery.status === 'switched') return { key: 'switched', text: t('resultSwitched', { host }) };
   if (delivery.status === 'current-fastest') return { key: 'fastest', text: t('resultFastest', { host }) };
   return { key: 'kept', text: t('resultKept', { host }) };

@@ -97,7 +97,7 @@ export const strings = Object.freeze({
   eventRequest: ['下载视频片段', 'Downloaded a segment'], eventRouting: ['选择请求线路', 'Chose a request server'], eventAssessment: ['网络评估', 'Network check'],
   eventRetry: ['提前重试片段', 'Retried a segment early'], eventRetryObserved: ['片段已重试', 'Segment retried'], eventRetryDisabled: ['本页停用提前重试', 'Early retry turned off for this page'],
   eventPlaying: ['开始播放', 'Playback started'], eventBuffering: ['开始缓冲', 'Buffering started'], eventPaused: ['已暂停', 'Paused'], eventSeeking: ['跳转', 'Seeked'],
-  eventStallEnded: ['卡顿结束', 'Stall ended'], eventOther: ['其他', 'Other']
+  eventStallEnded: ['卡顿结束', 'Stall ended'], eventOffline: ['网络已断开', 'Network offline'], eventOther: ['其他', 'Other']
 });
 
 // Returns t(key, values) for one language. Unknown keys return the key so a missing word is visible, never blank.

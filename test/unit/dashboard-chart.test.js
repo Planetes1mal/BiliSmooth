@@ -44,3 +44,14 @@ test('the ceiling doubles until the fastest value fits, so a fast server is neve
   assert.equal(ceilingFor([18.65, null]), 32);
   assert.equal(ceilingFor([]), CEILING);
 });
+
+test('a slow download keeps a digit, 1000 KB/s reads in MB/s, offline has its own words, an unknown host reads —', async () => {
+  const { megabytes } = await import('../../src/ui/shared/format.js');
+  const { describe } = await import('../../src/ui/dashboard/events.js');
+  const { testResult } = await import('../../src/ui/shared/playback.js');
+  const { translator } = await import('../../src/ui/shared/strings.js');
+  assert.deepEqual([megabytes(0.0004).value, megabytes(0.00001).value, megabytes(0.9996).unit, megabytes(0.5).value], ['0.4', '<0.1', 'MB/s', '500']);
+  const t = translator('zh');
+  assert.equal(describe({ type: 'offline', at: now }, t, 'zh').title, '网络已断开');
+  assert.equal(testResult({ delivery: { status: 'current-fastest' } }, t, () => '').text, '测速完成，—最快');
+});
