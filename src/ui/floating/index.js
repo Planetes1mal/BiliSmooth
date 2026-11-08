@@ -42,12 +42,12 @@ function boot(scope) {
   const setText = (node, value) => { if (node && node.textContent !== value) node.textContent = value; };
   const setHtml = (node, value) => { if (node && node.dataset.html !== value) { node.innerHTML = value; node.dataset.html = value; } };
 
-  // Only video, bangumi and list playback paths get a control, on the Chinese site and under /en/.
+  // Only video, bangumi and list playback paths get a control, with or without a language prefix (/en/, /zh-Hans/).
   function routeKey() {
     if (!/^(?:www\.)?bilibili\.com$/i.test(scope.location.hostname)) return '';
     const path = scope.location.pathname;
-    if (/^\/(?:en\/)?(?:video\/(?:BV[a-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+)\/?$/i.test(path)) return path;
-    if (!/^\/(?:en\/)?list\/(?:watchlater|ml\d+)\/?$/i.test(path)) return '';
+    if (/^\/(?:[a-z]{2}(?:-[A-Za-z]{2,4})?\/)?(?:video\/(?:BV[a-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+)\/?$/i.test(path)) return path;
+    if (!/^\/(?:[a-z]{2}(?:-[A-Za-z]{2,4})?\/)?list\/(?:watchlater|ml\d+)\/?$/i.test(path)) return '';
     const query = new URL(scope.location.href).searchParams, video = query.get('bvid') || query.get('oid');
     return video ? path + '?' + video : '';
   }

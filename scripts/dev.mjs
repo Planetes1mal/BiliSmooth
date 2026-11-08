@@ -1,7 +1,7 @@
 // The dedicated test browser: a persistent Chromium profile outside the repository that loads
 // dist/extension, keeps the maintainer's one-time Bilibili login, and after every build reloads
 // the extension and refreshes the open video tabs. It opens only video pages under test. Pages run with the
-// zh-CN locale, so Bilibili serves its Chinese site instead of redirecting to /en/.
+// zh-CN locale, so Bilibili serves its Chinese site instead of redirecting to /en/ or /zh-Hans/.
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
@@ -12,7 +12,7 @@ const root = repositoryRoot(import.meta.url);
 const extension = path.join(root, 'dist/extension');
 const buildMarker = path.join(extension, 'BUILD.json');
 const DEFAULT_VIDEO = 'https://www.bilibili.com/video/BV14nYT6mE5N/';
-const isVideoPage = url => /^https:\/\/www\.bilibili\.com\/(?:en\/)?(?:video\/(?:BV[A-Za-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+|list\/(?:watchlater|ml\d+))\/?/.test(url);
+const isVideoPage = url => /^https:\/\/www\.bilibili\.com\/(?:[a-z]{2}(?:-[A-Za-z]{2,4})?\/)?(?:video\/(?:BV[A-Za-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+|list\/(?:watchlater|ml\d+))\/?/.test(url);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const log = message => console.log(`[dev ${new Date().toLocaleTimeString('en-GB')}] ${message}`);
 
