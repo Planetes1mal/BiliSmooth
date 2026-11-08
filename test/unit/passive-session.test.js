@@ -319,6 +319,18 @@ test('ordinary saves have unique acknowledgements, preserve patches and flush th
   assert.ok(h.api.getDiagnostics().events.some(event => event.type === 'settings-save-failed'));
 });
 
+test('a failed save puts back the stored settings; an empty retry sends the failed edit again', async () => {
+  const h = harness(); h.message({ __bilismoothConfig: 'config', config: { theme: 'light' } });
+  h.api.setConfig({ theme: 'dark' });
+  const failed = h.messages.filter(row => row.__bilismoothConfig === 'save').at(-1);
+  const rejected = assert.rejects(h.api.flushSettings(), /storage-write-failed/);
+  h.message({ __bilismoothConfig: 'saved', id: failed.id, ok: false }); await rejected;
+  assert.equal(h.api.getConfig().theme, 'light'); assert.equal(h.api.getState().settingsSave.status, 'error');
+  h.api.setConfig({});
+  const retry = h.messages.filter(row => row.__bilismoothConfig === 'save').at(-1);
+  assert.equal(retry.patch.theme, 'dark'); assert.equal(h.api.getConfig().theme, 'dark');
+});
+
 test('missing storage acknowledgement times out, ignores late ack and can retry without losing edits', async () => {
   const h = harness(); h.api.setConfig({ theme: 'dark' });
   const original = h.messages.filter(row => row.__bilismoothConfig === 'save').at(-1);

@@ -1,7 +1,8 @@
 // Keeps the page's copy of the settings in step with the extension's storage authority.
 // Startup reads the same-origin cache synchronously; the content script then delivers the
-// authoritative config; every page edit is a patch with a save receipt. Also decides when a
-// settings change needs a page reload.
+// authoritative config; every page edit is a patch with a save receipt. A failed save puts back the
+// settings storage last confirmed and keeps the failed edit for a retry. Also decides when a settings
+// change needs a page reload.
 import settings from '../core/settings.js';
 
 const SAVE_TIMEOUT_MS = 5000;
@@ -11,6 +12,7 @@ const sameSetting = (a, b) => a === b || Array.isArray(a) && Array.isArray(b) &&
 export function createSettingsSync({ scope, wallNow, clone, log, notify, onConfig }) {
   let config = settings.normalize(), startupReady = false, observedPayload = false, earlyEdits = {};
   let saveSerial = 0, latestSave = null, unsavedEdits = {}, settingsSave = { status: 'saved' };
+  let stored = null, failedEdits = null, deliveredRouting = null;
   const pendingSaves = new Map(), reloadReasons = new Set();
   try { config = settings.normalize(JSON.parse(scope.localStorage.getItem(settings.cacheKey) || '{}')); } catch {}
   const installedP2pGuard = config.p2pGuard;
@@ -18,13 +20,18 @@ export function createSettingsSync({ scope, wallNow, clone, log, notify, onConfi
   function finishSave(id, ok, error = '') {
     const record = pendingSaves.get(id); if (!record) return;
     scope.clearTimeout(record.timer); pendingSaves.delete(id);
-    if (ok) for (const [key, value] of Object.entries(record.patch)) {
-      if (sameSetting(unsavedEdits[key], value)) delete unsavedEdits[key];
+    if (ok) {
+      for (const [key, value] of Object.entries(record.patch)) if (sameSetting(unsavedEdits[key], value)) delete unsavedEdits[key];
+      if (stored) stored = settings.normalize({ ...stored, ...record.patch });
     }
     if (record === latestSave) {
       settingsSave = ok ? { status: 'saved' } : { status: 'error', error: error || 'storage-write-failed' };
       if (ok) reloadReasons.delete('storage-write-failed');
-      else { reloadReasons.add('storage-write-failed'); log('settings-save-failed', { reason: settingsSave.error }); }
+      else {
+        reloadReasons.add('storage-write-failed'); log('settings-save-failed', { reason: settingsSave.error });
+        // What the page shows must match what is stored: put the stored settings back and keep the edit for a retry.
+        if (stored) { failedEdits = { ...unsavedEdits }; unsavedEdits = {}; apply(stored); }
+      }
       notify();
     }
     record.resolve({ ok, error: error || 'storage-write-failed' });
@@ -50,8 +57,21 @@ export function createSettingsSync({ scope, wallNow, clone, log, notify, onConfi
       return true;
     }
   }
+  // Applies a complete config to the page and the kernel without saving it.
+  function apply(next) {
+    config = settings.normalize(next);
+    if (config.p2pGuard !== installedP2pGuard) reloadReasons.add('p2p-guard'); else reloadReasons.delete('p2p-guard');
+    if (deliveredRouting && routingKeys.every(key => sameSetting(config[key], deliveredRouting[key]))) reloadReasons.delete('playinfo-config');
+    onConfig(config); startupCache();
+  }
   function save(patch, authoritative = false) {
     const previous = config;
+    if (authoritative) stored = settings.normalize(patch);
+    else if (failedEdits) {
+      // An empty patch after a failure is the retry; any other edit replaces the failed one.
+      if (!Object.keys(settings.patch(patch)).length) patch = failedEdits;
+      failedEdits = null;
+    }
     if (!authoritative && !startupReady) earlyEdits = { ...earlyEdits, ...settings.patch(patch) };
     if (authoritative) patch = { ...patch, ...unsavedEdits, ...(!startupReady ? earlyEdits : {}) };
     config = settings.normalize({ ...config, ...settings.patch(patch) });
@@ -77,6 +97,7 @@ export function createSettingsSync({ scope, wallNow, clone, log, notify, onConfi
     return false;
   }
   return { config: () => config, save, persist, flush, adopt, handleMessage,
-    markPayloadObserved() { observedPayload = true; }, startupReady: () => startupReady,
+    markPayloadObserved() { if (!observedPayload) deliveredRouting = Object.fromEntries(routingKeys.map(key => [key, config[key]])); observedPayload = true; },
+    startupReady: () => startupReady,
     status: () => ({ ...settingsSave }), reloadReasons: () => [...reloadReasons], needsReload: () => reloadReasons.size > 0 };
 }

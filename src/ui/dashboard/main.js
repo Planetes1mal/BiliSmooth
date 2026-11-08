@@ -63,9 +63,10 @@ function choose(choice) {
   if (choice === 'default') return save({ enabled: false });
   if (settings.isCdnHost(choice)) return save({ host: choice }, { action: 'applyRoute' });
 }
+// The dashboard's own failed edit, or an empty patch: the video page then sends its failed edit again.
 function retrySave() {
   if (failedEdit) return save(failedEdit.patch, { action: failedEdit.action });
-  return save(settings.patch(conn.state.config));
+  return save({});
 }
 // A one-off command from a button; the key keeps the button busy while it runs.
 async function act(key, action, patch) {
