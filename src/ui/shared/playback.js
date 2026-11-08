@@ -34,14 +34,14 @@ export function choicePatch(choice, config) {
   return { enabled: true, selection: 'auto', mode: config?.mode === 'off' ? 'bad-only' : config?.mode || 'bad-only' };
 }
 
-// Headline and detail keys for the state banner. Availability and routing-off outrank playback.
+// Headline keys for the state banner, with a detail only where the headline cannot say why (availability).
+// Availability and routing-off outrank playback.
 export function statusKeys(view, state) {
   const reason = view?.availability?.reason;
   if (reason) return { tone: 'error', title: reason === 'payment' ? 'payment' : reason === 'region' ? 'region' : 'unavailable', detail: (reason === 'payment' ? 'payment' : reason === 'region' ? 'region' : 'unavailable') + 'Detail' };
   const tone = { smooth: 'ok', playing: 'ok', buffering: 'warn', frozen: 'error', error: 'error' }[state] || 'idle';
-  if (!routingActive(view?.config) && ['smooth', 'playing'].includes(state)) return { tone: 'idle', title: 'defaultOn', detail: 'defaultOnDetail' };
-  const title = state === 'disconnected' ? 'waiting' : state;
-  return { tone, title, detail: title + 'Detail' };
+  if (!routingActive(view?.config) && ['smooth', 'playing'].includes(state)) return { tone: 'idle', title: 'defaultOn', detail: null };
+  return { tone, title: state === 'disconnected' ? 'waiting' : state, detail: null };
 }
 
 // The last speed test in words, or null when there is nothing to report.

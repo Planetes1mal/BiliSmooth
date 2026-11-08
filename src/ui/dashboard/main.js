@@ -143,7 +143,7 @@ function notice() {
     return { tone: 'err', icon: 'alert', title: 'readFailed', detail: 'readFailedDetail', action: ['reconnect', false, () => conn.refresh(true)] };
   if (failedEdit || (view?.settingsSave?.status === 'error' && !pending.size))
     return { tone: 'err', icon: 'alert', title: 'saveFailed', detail: 'saveFailedDetail', action: ['retry', true, retrySave] };
-  if (s.status === 'connecting') return { icon: 'refresh', title: 'connecting', detail: 'connectingDetail' };
+  if (s.status === 'connecting') return { icon: 'refresh', title: 'connecting' };
   if (s.status === 'no-tab') return s.tabs.length ? { icon: 'info', title: 'chooseVideo' } : { icon: 'info', title: 'noTab', detail: 'noTabDetail' };
   if (s.status === 'stale') return { tone: 'warn', icon: 'alert', title: 'stale', detail: 'staleDetail', action: ['reload', true, () => conn.reloadVideo()] };
   if (s.status === 'no-response') return { tone: 'warn', icon: 'alert', title: 'noResponse', detail: 'noResponseDetail', action: ['retry', false, () => conn.refresh(true)] };
@@ -154,8 +154,8 @@ function notice() {
     return { tone: 'err', icon: 'alert', title: key, detail: key + 'Detail' };
   }
   if (view?.needReload && view.startupReady !== false && view.settingsSave?.status !== 'pending' && !pending.size)
-    return { tone: 'warn', icon: 'refresh', title: 'applyReload', detail: 'applyReloadDetail', action: ['reload', true, reloadWithSettings, 'reload'] };
-  if (view && !view.media?.present && !reason) return { icon: 'info', title: 'waitVideo', detail: 'connectingDetail' };
+    return { tone: 'warn', icon: 'refresh', title: 'applyReload', action: ['reload', true, reloadWithSettings, 'reload'] };
+  if (view && !view.media?.present && !reason) return { icon: 'info', title: 'waitVideo' };
   return null;
 }
 function renderNotice() {

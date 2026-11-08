@@ -40,6 +40,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent
 .state b { display: block; font-size: 15px; font-weight: 600; }
 .state[data-tone=error] b { color: var(--error); } .state[data-tone=warn] b { color: var(--warn); }
 .state small { display: block; font-size: 13px; color: var(--muted); }
+.state small:empty { display: none; }
 .wave { display: inline-flex; align-items: center; gap: 3px; height: 18px; }
 .wave i { width: 3.5px; border-radius: 2px; background: currentColor; }
 .wave i:nth-child(1) { height: 8px; } .wave i:nth-child(2) { height: 14px; } .wave i:nth-child(3) { height: 18px; } .wave i:nth-child(4) { height: 12px; } .wave i:nth-child(5) { height: 9px; }

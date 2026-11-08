@@ -18,12 +18,12 @@ export function createServers(section, app) {
   testButton.innerHTML = icon('refresh'); testButton.append(T('test'));
   head.append(h('div.headacts', result, testButton));
 
-  const option = (value, nameNode, detailKey) => {
+  const option = (value, nameNode) => {
     const input = h('input', { type: 'radio', name: 'server', value, onchange: () => input.checked && app.choose(value) });
-    return h('label.ropt.wide', { dataset: { choice: value } }, input, h('span.radio'), h('div', h('b', nameNode), h('small', { 'data-t': detailKey })), h('span'));
+    return h('label.ropt.wide', { dataset: { choice: value } }, input, h('span.radio'), h('div', h('b', nameNode)), h('span'));
   };
-  const auto = option('auto', [T('automatic'), ' ', h('span.badge', { 'data-t': 'recommended' })], 'automaticDetail');
-  const fallback = option('default', T('biliDefault'), 'biliDefaultDetail');
+  const auto = option('auto', T('automatic'));
+  const fallback = option('default', T('biliDefault'));
   const header = h('div.ropt.th', { 'aria-hidden': 'true' }, h('span'), T('server'), h('span'), T('speed'), T('firstByte'), h('span.age', { 'data-t': 'tested' }));
   const list = h('div.hostrows');
   const radios = h('div.radios', { role: 'radiogroup', 'data-t-label': 'servers' }, auto, fallback, h('p.grouplabel', { 'data-t': 'fixedGroup' }), header, list);

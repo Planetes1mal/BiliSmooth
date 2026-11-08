@@ -138,7 +138,7 @@ function boot(scope) {
     node.dataset.tone = keys.tone;
     setHtml(node.querySelector('.glyph'), stateIcon(keys.tone, state));
     setText(node.querySelector('b'), t(keys.title));
-    setText(node.querySelector('small'), t(keys.detail));
+    setText(node.querySelector('small'), keys.detail ? t(keys.detail) : '');
   }
   function serverLabel(choice) {
     return choice === 'auto' ? t('automatic') : choice === 'default' ? t('biliDefault') : format.serverName(choice, view.config?.lang) || format.DASH;
@@ -150,7 +150,7 @@ function boot(scope) {
   function renderMenu(choice) {
     const lang = view.config?.lang;
     const option = (value, label, detail = '') => `<button class="opt" type="button" role="menuitemradio" aria-checked="${choice === value}" data-choice="${value}"><span class="radio"></span><span class="grow">${label}${detail ? `<small>${detail}</small>` : ''}</span></button>`;
-    setHtml($('server-menu'), option('auto', t('automatic'), t('recommended')) + option('default', t('biliDefault')) + `<div class="group">${t('fixedGroup')}</div>` +
+    setHtml($('server-menu'), option('auto', t('automatic')) + option('default', t('biliDefault')) + `<div class="group">${t('fixedGroup')}</div>` +
       hosts().map(host => option(host, format.serverName(host, lang), format.hostLabel(host))).join(''));
   }
   function render() {

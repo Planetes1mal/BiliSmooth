@@ -51,8 +51,6 @@ input.switch:checked::before { transform: translateX(16px); }
 .input::placeholder { color: var(--muted); }
 .input.bad { border-color: var(--error); }
 .field-error { padding: 0 14px; font-size: 13px; color: var(--error); }
-.badge { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 12px; background: var(--accent-soft); color: var(--on-accent); font-size: 13px; font-weight: 600; white-space: nowrap; vertical-align: 1px; }
-:root[data-theme=dark] .badge { background: var(--accent); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--ok-dot); flex: none; }
 .dot.warn { background: var(--warn-dot); } .dot.err { background: var(--error-dot); } .dot.idle { background: var(--track); }
 
@@ -83,8 +81,6 @@ input.switch:checked::before { transform: translateX(16px); }
 .live-speed strong { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .live-speed strong small { font-size: 13px; font-weight: 500; color: var(--muted); }
 .foot { padding: 0 12px; display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
-.foot span:first-child { display: flex; align-items: center; gap: 8px; }
-.foot span:first-child::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-strong); }
 
 .main { padding: 0 32px 48px; min-width: 0; }
 .main:focus { outline: none; }
@@ -129,6 +125,7 @@ input.switch:checked::before { transform: translateX(16px); }
 .status .glyph .ic { width: 22px; height: 22px; }
 .status b { display: block; font-size: 15px; font-weight: 600; }
 .status small { display: block; font-size: 13px; color: var(--muted); }
+.status small:empty { display: none; }
 .status[data-tone=warn] { background: var(--warn-soft); } .status[data-tone=warn] .glyph, .status[data-tone=warn] b { color: var(--warn); }
 .status[data-tone=warn] .wave i:nth-child(n+3) { opacity: .3; }
 .status[data-tone=error] { background: var(--error-soft); } .status[data-tone=error] .glyph, .status[data-tone=error] b { color: var(--error); }

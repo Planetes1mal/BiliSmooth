@@ -46,7 +46,7 @@ export function createOverview(stack, app) {
     banner.dataset.tone = keys.tone;
     const glyph = keys.title === 'defaultOn' ? icon('dashed') : glyphs[state] || icon('dashed');
     if (banner.firstChild.dataset.glyph !== glyph) { banner.firstChild.dataset.glyph = glyph; banner.firstChild.innerHTML = glyph; }
-    text(banner.querySelector('b'), t(keys.title)); text(banner.querySelector('small'), t(keys.detail));
+    text(banner.querySelector('b'), t(keys.title)); text(banner.querySelector('small'), keys.detail ? t(keys.detail) : '');
 
     const rate = connected ? format.speed(view) : null;
     figure(speed.querySelector('strong'), rate?.value, rate?.unit);
