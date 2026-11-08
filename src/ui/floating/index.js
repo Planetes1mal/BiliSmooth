@@ -41,12 +41,12 @@ function boot(scope) {
   const setText = (node, value) => { if (node && node.textContent !== value) node.textContent = value; };
   const setHtml = (node, value) => { if (node && node.dataset.html !== value) { node.innerHTML = value; node.dataset.html = value; } };
 
-  // Only video, bangumi and list playback paths get a control.
+  // Only video, bangumi and list playback paths get a control, on the Chinese site and under /en/.
   function routeKey() {
     if (!/^(?:www\.)?bilibili\.com$/i.test(scope.location.hostname)) return '';
     const path = scope.location.pathname;
-    if (/^\/(?:video\/(?:BV[a-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+)\/?$/i.test(path)) return path;
-    if (!/^\/list\/(?:watchlater|ml\d+)\/?$/i.test(path)) return '';
+    if (/^\/(?:en\/)?(?:video\/(?:BV[a-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+)\/?$/i.test(path)) return path;
+    if (!/^\/(?:en\/)?list\/(?:watchlater|ml\d+)\/?$/i.test(path)) return '';
     const query = new URL(scope.location.href).searchParams, video = query.get('bvid') || query.get('oid');
     return video ? path + '?' + video : '';
   }

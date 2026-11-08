@@ -111,6 +111,9 @@ test('current-video metadata clears immediately on route change and waits for th
     assert.equal(h.api.getViewState().videoMeta.url, `https://www.bilibili.com/video/BV${list}/`);
     assert.equal(h.api.getViewState().videoMeta.title, list);
   }
+  h.scope.location.href = 'https://www.bilibili.com/en/video/BVenglish/'; h.document.title = 'English page_bilibili'; h.advance(1000);
+  assert.equal(h.api.getViewState().videoMeta.url, 'https://www.bilibili.com/en/video/BVenglish/');
+  assert.equal(h.api.getViewState().videoMeta.title, 'English page');
 });
 test('synchronous namespace config reaches kernel before storage handshake and does not overwrite storage on install', () => {
   const h = harness({ storage: { 'bilismooth.startup.v4': JSON.stringify({ enabled: false, pcdnHost: B, mcdnStrategy: 'replace', p2pGuard: true }) } });

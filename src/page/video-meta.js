@@ -6,8 +6,8 @@ export function createVideoMeta({ scope, document }) {
   function pageUrl() {
     try {
       const value = new URL(scope.location.href);
-      if (value.protocol === 'https:' && /(^|\.)bilibili\.com$/.test(value.hostname) && /^\/(?:video\/(?:BV|av)[\w]+|bangumi\/play\/(?:ep|ss)\d+)(?:\/|$)/i.test(value.pathname)) return value.origin + value.pathname;
-      if (value.protocol === 'https:' && /^(?:www\.)?bilibili\.com$/i.test(value.hostname) && /^\/list\/(?:watchlater|ml\d+)\/?$/i.test(value.pathname)) {
+      if (value.protocol === 'https:' && /(^|\.)bilibili\.com$/.test(value.hostname) && /^\/(?:en\/)?(?:video\/(?:BV|av)[\w]+|bangumi\/play\/(?:ep|ss)\d+)(?:\/|$)/i.test(value.pathname)) return value.origin + value.pathname;
+      if (value.protocol === 'https:' && /^(?:www\.)?bilibili\.com$/i.test(value.hostname) && /^\/(?:en\/)?list\/(?:watchlater|ml\d+)\/?$/i.test(value.pathname)) {
         const bvid = value.searchParams.get('bvid'), oid = value.searchParams.get('oid');
         const id = /^BV[a-z0-9]+$/i.test(bvid || '') ? bvid : /^\d+$/.test(oid || '') ? 'av' + oid : '';
         if (id) return value.origin + '/video/' + id + '/';

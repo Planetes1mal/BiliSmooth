@@ -61,11 +61,14 @@ const mutate = async (page, code) => { await page.evaluate(code); await page.wai
 const rect = locator => locator.boundingBox();
 const overlaps = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 
-test('mounts collapsed on video paths only, avoids the player, and walks entry → preview → panel and back', async () => {
+test('mounts collapsed on video paths only (also under /en/), avoids the player, and walks entry → preview → panel and back', async () => {
   const off = await fixture({ path: '/' });
   await off.page.waitForTimeout(200);
   assert.equal(await off.page.locator('#bilismooth-floating').count(), 0, 'no control on the home page');
   await off.context.close();
+  const english = await fixture({ path: '/en/video/BV1u2bg6XECo' });
+  await english.host.waitFor({ state: 'visible' });
+  await english.context.close();
 
   const { page, context, host, errors } = await fixture();
   await host.waitFor({ state: 'visible' });
