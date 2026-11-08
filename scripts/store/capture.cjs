@@ -62,7 +62,7 @@ This command does not upload or publish anything.`);
     await worker.evaluate(async language => {
       const key = 'bilismooth.config.v4';
       const old = (await chrome.storage.local.get(key))[key] || {};
-      await chrome.storage.local.set({ [key]: { ...old, lang: language, theme: 'light', accent: 'blue' } });
+      await chrome.storage.local.set({ [key]: { ...old, lang: language, theme: 'light', accent: 'blue', customHosts: ['cn-jxnc-cmcc-bcache-06.bilivideo.com'] } });
     }, language);
     const page = await context.newPage();
     for (const old of context.pages()) if (old !== page) await old.close();
