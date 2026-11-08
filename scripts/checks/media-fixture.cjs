@@ -65,4 +65,4 @@ async function generateMedia(browser) {
   return { metadata, video, audio };
 }
 
-(async () => { const browser = await chromium.launch({ channel: 'chromium', headless: true }); try { const result = await generateMedia(browser); console.log(JSON.stringify(result.metadata)); } finally { await browser.close(); } })().catch(error => { console.error(error); process.exitCode = 1; });
+(async () => { const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--mute-audio'] }); try { const result = await generateMedia(browser); console.log(JSON.stringify(result.metadata)); } finally { await browser.close(); } })().catch(error => { console.error(error); process.exitCode = 1; });

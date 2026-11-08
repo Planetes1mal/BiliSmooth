@@ -224,7 +224,7 @@ if (require.main === module) (async () => {
       try { authState = { cookies: await requireLoginCookies(), origins: [] }; }
       catch { throw Object.assign(Error(), { measurementReason: 'login-missing-run-npm-run-dev' }); }
     }
-    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--disable-background-networking'] });
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--disable-background-networking', '--mute-audio'] });
     report.browserVersion = browser.version();
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...(authState ? { storageState: authState } : {}) }), page = await context.newPage();
     if (authenticatedRun) {

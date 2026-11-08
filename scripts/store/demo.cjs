@@ -351,7 +351,7 @@ async function compose({ clips, timeline, locale, out }) {
   const editorHTML = await fs.readFile(path.join(__dirname, '../fixtures/demo-video-editor.html'), 'utf8');
   const brand = await fs.readFile(path.join(root, 'src/extension/icons/128.png'));
   const base = 'https://bilismooth-demo.local/';
-  const browser = await chromium.launch({ channel: 'chromium', headless: true });
+  const browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--mute-audio'] });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await page.route('**/*', route => {

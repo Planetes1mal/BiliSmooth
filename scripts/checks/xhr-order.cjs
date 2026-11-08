@@ -24,7 +24,7 @@ const outputDirectory = createEvidenceOutput({ root, suite: 'xhr-order' });
   const source = bundled.outputFiles[0].text;
   const report = { label, generatedAt: new Date().toISOString(), sourceSha256: crypto.createHash('sha256').update(source).digest('hex'), checks: [] };
   try {
-    browser = await chromium.launch({ channel: 'chromium', headless: true }); report.browserVersion = browser.version();
+    browser = await chromium.launch({ channel: 'chromium', headless: true, args: ['--mute-audio'] }); report.browserVersion = browser.version();
     const page = await browser.newPage(); await page.goto('http://127.0.0.1:' + server.address().port + '/'); await page.addScriptTag({ content: source });
     report.phases = await page.evaluate(async () => {
       const cases = [];

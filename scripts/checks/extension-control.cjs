@@ -17,7 +17,7 @@ const check=(name,passed,detail)=>{checks.push({name,passed:!!passed,...(detail=
  try{
   // Reserve realistic side-column room for the readable detail card; narrow
   // no-fit behavior has its own floating regression rather than this flow test.
-  context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1440,height:768},acceptDownloads:true,args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
+  context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,viewport:{width:1440,height:768},acceptDownloads:true,args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`,'--mute-audio']});
   context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)));
   await context.route('**/*',route=>{
    const url=new URL(route.request().url());if(url.protocol==='chrome-extension:')return route.continue();

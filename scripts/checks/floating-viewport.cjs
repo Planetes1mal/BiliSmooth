@@ -112,7 +112,7 @@ async function measure(page) {
     context = await chromium.launchPersistentContext(profile, { headless: true, channel: 'chromium',
       viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce',
       ignoreDefaultArgs: ['--hide-scrollbars'], args: ['--disable-features=OverlayScrollbar,OverlayScrollbars', '--show-scrollbars',
-        '--disable-extensions-except=' + helper, '--load-extension=' + helper] });
+        '--disable-extensions-except=' + helper, '--load-extension=' + helper, '--mute-audio'] });
     await context.route('**/*', route => {
       if (route.request().isNavigationRequest() && route.request().url().startsWith('https://www.bilibili.com/video/')) return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Local scrollbar fixture</title><body></body>' });
       blocked.push(route.request().url()); return route.abort();

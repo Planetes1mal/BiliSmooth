@@ -32,7 +32,7 @@ async function readLoginCookies() {
     } finally { await browser.close(); }
   }
   if (!fs.existsSync(DEV_PROFILE)) return [];
-  const context = await chromium.launchPersistentContext(DEV_PROFILE, { channel: 'chromium', headless: true });
+  const context = await chromium.launchPersistentContext(DEV_PROFILE, { channel: 'chromium', headless: true, args: ['--mute-audio'] });
   try { return onlyBilibili(await context.cookies('https://www.bilibili.com/')); }
   finally { await context.close(); }
 }
