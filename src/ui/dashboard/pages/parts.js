@@ -38,7 +38,8 @@ export function serverSelect(app) {
   const node = h('span.select', select);
   node.insertAdjacentHTML('beforeend', icon('down'));
   let key = '';
-  function render(value) {
+  function render(value, disabled = false) {
+    select.disabled = disabled;
     const hosts = app.hosts(), next = JSON.stringify([hosts, app.lang]);
     if (next !== key) {
       key = next;

@@ -3,14 +3,15 @@
 import settings from '../../../core/settings.js';
 import * as format from '../../shared/format.js';
 import { icon, mark } from '../../shared/icons.js';
-import { projectPlayback, serverChoice } from '../../shared/playback.js';
+import { projectPlayback, serverChoice, statusKeys } from '../../shared/playback.js';
 import { h, text } from '../dom.js';
 import { T, segmented, toggle, line } from './parts.js';
 
 const swatches = { blue: '#2456D6', teal: '#0E7C86', green: '#2F7D4F', orange: '#B4531A', pink: '#C2185B', graphite: '#4A4F57' };
 const accentKeys = { blue: 'accentBlue', teal: 'accentTeal', green: 'accentGreen', orange: 'accentOrange', pink: 'accentPink', graphite: 'accentGraphite' };
 const entryKeys = { icon: 'entryIcon', buffer: 'entryBuffer', speed: 'entrySpeed', combined: 'entryCombined' };
-const tones = { smooth: '', playing: '', buffering: 'warn', frozen: 'err', error: 'err', blocked: 'err' };
+// The preview dot takes the real entry's tone, so Bilibili default reads idle here too.
+const dotClass = { ok: '', warn: 'warn', error: 'err', idle: 'idle' };
 
 export function createSettings(stack, app) {
   const save = key => value => app.save({ [key]: value });
@@ -84,7 +85,7 @@ export function createSettings(stack, app) {
 
   function render() {
     const { config, connected, view } = app;
-    const state = projectPlayback(view, connected), tone = tones[state] ?? 'idle', values = entryNumbers();
+    const state = projectPlayback(view, connected), tone = dotClass[statusKeys(view, state).tone] ?? 'idle', values = entryNumbers();
     for (const item of tiles) {
       const on = config.floatingEntryType === item.type;
       if (item.input.checked !== on) item.input.checked = on;

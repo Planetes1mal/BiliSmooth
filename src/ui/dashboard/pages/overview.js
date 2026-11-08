@@ -61,7 +61,8 @@ export function createOverview(stack, app) {
 
     chart.update(series(view.speedSamples));
     text(ceiling, t('ceiling', { n: chart.ceiling() }));
-    select.render(serverChoice(config));
+    // Changing servers cannot help a blocked video; the floating control says the same.
+    select.render(serverChoice(config), !!view.availability);
     const outcome = testResult(view, t, app.name), blocker = outcome ? null : testBlocker(view, t);
     result.classList.toggle('done', !!outcome && outcome.key !== 'testing');
     const resultKey = outcome ? outcome.text : blocker || '';

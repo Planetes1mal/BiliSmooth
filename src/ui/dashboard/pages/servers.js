@@ -113,6 +113,9 @@ export function createServers(section, app) {
       const radio = node.querySelector('input');
       if (radio.checked !== on) radio.checked = on;
     }
+    // Changing servers cannot help a blocked video; the floating control says the same.
+    const blocked = connected && !!view.availability;
+    radios.inert = form.inert = when.inert = blocked;
     show(when, choice !== 'auto' && choice !== 'default');
     mode.set(config.mode === 'force' ? 'force' : 'bad-only');
     clear.disabled = !connected || app.busy('reset');

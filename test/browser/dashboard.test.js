@@ -169,6 +169,16 @@ test('a background save that ends after the tab answers again keeps the tab stat
   assert.equal(await page.evaluate(() => typeof BiliSmoothView.getSnapshot()?.media), 'object', 'the snapshot is still the tab state');
 });
 
+test('custom hosts, blocked videos and the entry preview read as in the floating control', async t => {
+  const custom = 'upos-sz-mirrorcustom.bilivideo.com';
+  const page = await open(t, { hash: 'routes', settings: { selection: 'auto', pcdnHost: custom } });
+  await page.locator(`label.ropt[data-choice="${custom}"]`).waitFor();
+  const blocked = await open(t, { hash: 'routes', overrides: { availability: { reason: 'region' } } });
+  assert.equal(await blocked.locator('.radios').evaluate(node => node.inert), true);
+  const off = await open(t, { hash: 'settings', settings: { enabled: false } });
+  assert.equal(await off.locator('.etile .dot').first().getAttribute('class'), 'dot idle');
+});
+
 test('a reload whose save fails says the video was not reloaded', async t => {
   const page = await open(t, { overrides: { needReload: true, reloadReasons: ['playinfo-config'] } });
   await page.evaluate(() => { fx.failConfig = true; });

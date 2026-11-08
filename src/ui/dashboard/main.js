@@ -31,11 +31,11 @@ const app = {
   busy: key => busy.has(key),
   motionOn: () => conn.state.motion && !reduced.matches && !document.hidden,
   name: host => format.serverName(host, lang),
-  // Every server the user can pin: the allowed list plus a custom host already in use.
+  // Every server the user can pin: the allowed list plus the custom host they added, as in the floating menu.
   hosts() {
     const list = [...(conn.state.snapshot?.allowedHosts || settings.fixedHosts)];
     const config = app.config;
-    if (config.selection === 'fixed' && settings.isCdnHost(config.pcdnHost) && !list.includes(config.pcdnHost)) list.push(config.pcdnHost);
+    if (settings.isCdnHost(config.pcdnHost) && !list.includes(config.pcdnHost)) list.push(config.pcdnHost);
     return list;
   },
   save, choose, act, go, toast, confirm, test, render: queueRender,

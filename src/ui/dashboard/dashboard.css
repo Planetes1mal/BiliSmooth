@@ -28,6 +28,7 @@ h1, h2, p { margin: 0; }
 .btn.dangerfill { background: var(--error); color: var(--surface); }
 .btn.dangerfill:hover:not(:disabled) { background: color-mix(in srgb, var(--error) 88%, var(--ink)); }
 .btn:disabled { opacity: .45; cursor: default; }
+.select select:disabled, [inert] { opacity: .5; cursor: default; }
 .btn .ic { width: 16px; height: 16px; }
 
 input.switch { appearance: none; position: relative; width: 40px; height: 24px; margin: 0; border-radius: 12px; background: var(--track); flex: none; cursor: pointer; transition: background-color .15s; }
