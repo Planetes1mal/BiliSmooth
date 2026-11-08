@@ -35,7 +35,7 @@ const check=(name,passed,detail)=>{checks.push({name,passed:!!passed,...(detail=
   const sourceId=await worker.evaluate(async()=> (await chrome.tabs.query({url:'https://www.bilibili.com/video/BVcontrolA'}))[0].id);
   const secondId=await worker.evaluate(async()=> (await chrome.tabs.query({url:'https://www.bilibili.com/video/BVcontrolB'}))[0].id);
   const initial=await source.evaluate(()=>BiliSmoothRuntime.getState());
-  check('Real content bridge retains migrated preferences before declaring startup ready',initial.version===version&&!initial.config.enabled&&initial.config.selection==='fixed'&&initial.config.theme==='dark'&&initial.config.accent==='teal');
+  check('Real content bridge retains migrated preferences before declaring startup ready; the old default teal becomes blue once',initial.version===version&&!initial.config.enabled&&initial.config.selection==='fixed'&&initial.config.theme==='dark'&&initial.config.accent==='blue');
   const floating=page=>page.locator('#bilismooth-floating');
   const phase=page=>floating(page).getAttribute('data-phase');
   check('Exactly one initially collapsed in-page control exists',await floating(source).count()===1&&await phase(source)==='edge');
