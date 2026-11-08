@@ -154,7 +154,8 @@ function boot(scope) {
       hosts().map(host => option(host, format.serverName(host, lang), format.hostLabel(host))).join(''));
   }
   function render() {
-    if (!mounted || suspended || document.hidden) { syncMotion(); return; }
+    // Concealed (full screen, small viewport): nothing to draw until the control shows again.
+    if (!mounted || suspended || document.hidden || (host.hidden && host.dataset.hiddenReason)) { syncMotion(); return; }
     if (routeKey() !== route) { syncLifecycle(); return; }
     view = runtime.getViewState();
     view.config ||= runtime.getConfig();
@@ -339,7 +340,9 @@ function boot(scope) {
     stopPositionAnimation(true);
     const bounds = viewport(scope), maxHeight = Math.max(0, bounds.height - 2 * INSET), maxWidth = Math.max(0, bounds.width - 2 * INSET);
     if (maxWidth < 44 || maxHeight < 44) { conceal('viewport-too-small'); return; }
-    if (scan) protection.scan();
+    // Page regions matter only while a corner is being chosen or the placement settles.
+    if (scan && (!anchor || settling())) protection.scan();
+    const wasConcealed = host.hidden && !!host.dataset.hiddenReason;
     host.style.setProperty('--max-height', maxHeight / bounds.scaleY + 'px');
     host.hidden = false;
     if (WIDTH[phase]) visible().style.width = Math.min(WIDTH[phase], maxWidth / bounds.scaleX) + 'px';
@@ -360,6 +363,7 @@ function boot(scope) {
     }
     showAt(at);
     captureAnchor(at, chosen, bounds);
+    if (wasConcealed) queueRender();
     host.dataset.layoutRevision = String((Number(host.dataset.layoutRevision) || 0) + 1);
   }
   // The preferred corner, then the others; when none is clear, the one that covers the least.
@@ -469,7 +473,7 @@ function boot(scope) {
     snapped = { x: null, y: null };
     lastPlacement = null;
     closeMenu();
-    place(false);
+    place(true);
     settle = null;
     persistPlacement();
     if (!host.hidden) $('more').focus({ preventScroll: true });
@@ -567,7 +571,7 @@ function boot(scope) {
     event.preventDefault();
     clearHover();
     stopPositionAnimation(true);
-    if (event.key === 'Home') { anchor = null; snapped = { x: null, y: null }; preference = 'bottomRight'; lastPlacement = null; place(false); settle = null; }
+    if (event.key === 'Home') { anchor = null; snapped = { x: null, y: null }; preference = 'bottomRight'; lastPlacement = null; place(true); settle = null; }
     else {
       const rect = host.getBoundingClientRect(), step = event.shiftKey ? 32 : 8;
       moveTo({ x: rect.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: rect.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0) });
@@ -744,7 +748,8 @@ function boot(scope) {
   }, true);
   listen(scope, 'resize', queueLayout);
   if (scope.visualViewport) { listen(scope.visualViewport, 'resize', queueLayout); listen(scope.visualViewport, 'scroll', queueLayout); }
-  listen(scope, 'scroll', queueLayout, { passive: true, capture: true });
+  // Scrolling moves page regions under a fixed control; that matters only before the first placement.
+  listen(scope, 'scroll', () => { if (!anchor) queueLayout(); }, { passive: true, capture: true });
   listen(darkQuery, 'change', queueRender);
   listen(reduceQuery, 'change', syncMotion);
   listen(document, 'visibilitychange', () => { if (document.hidden) conceal('document-hidden'); else { syncLifecycle(); queueRender(); queueLayout(); } });
@@ -797,7 +802,8 @@ function boot(scope) {
           if (protection.observes(record.target) || record.target.matches?.(watched)) { queueLayout(); return; }
           continue;
         }
-        if ([...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1 && node !== host && node !== snapHint && (node.matches(watched) || node.querySelector(watched)))) { queueLayout(); return; }
+        // New regions and controls matter only while a corner is chosen or the placement settles.
+        if ((!anchor || settling()) && [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1 && node !== host && node !== snapHint && (node.matches(watched) || node.querySelector(watched)))) { queueLayout(); return; }
       }
     });
     domObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'] });
