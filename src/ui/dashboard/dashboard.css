@@ -68,8 +68,8 @@ input.switch:checked::before { transform: translateX(16px); }
 .line.label { min-height: 40px; }
 .stack { display: grid; gap: 16px; }
 
-/* Frame */
-.app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100svh; }
+/* Frame: the top bar and every page share one centered width; wide windows add a right column (see the end). */
+.app { --page: 1440px; --rail: 380px; display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100svh; }
 .side { position: sticky; top: 0; height: 100svh; display: flex; flex-direction: column; padding: 16px 12px 20px; }
 .brand { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 6px; margin-bottom: 20px; font-size: 15px; font-weight: 700; }
 .nav { display: grid; gap: 2px; }
@@ -83,7 +83,7 @@ input.switch:checked::before { transform: translateX(16px); }
 .live-speed strong small { font-size: 13px; font-weight: 500; color: var(--muted); }
 .foot { padding: 0 12px; display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
 
-.main { padding: 0 32px 48px; min-width: 0; }
+.main { padding: 0 max(32px, calc((100% - var(--page)) / 2)) 48px; min-width: 0; }
 .main:focus { outline: none; }
 .topbar { display: flex; align-items: center; gap: 6px; height: 72px; }
 .topbar .grow { flex: 1; }
@@ -274,6 +274,38 @@ svg.chart .end { fill: var(--accent-strong); stroke: var(--surface); stroke-widt
 .toast.in { opacity: 1; transform: translate(-50%, 0); }
 :root[data-motion=off] .toast { transform: translate(-50%, 0); }
 .toast .ic { width: 18px; height: 18px; }
+
+/* Wide windows: each page splits into a main column and a right column. The breakpoint is WIDE in pages/settings.js. */
+@media (min-width: 1440px) {
+  /* Overview: state, numbers and chart on the left; the server card and recent activity on the right. */
+  .page[data-page=overview] .stack { grid-template-columns: minmax(0, 1fr) var(--rail); grid-template-areas: "banner quick" "kpis quick" "chart recent"; }
+  .page[data-page=overview] .stack:has(> .status[hidden]) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "kpis"; }
+  .page[data-page=overview] .two-up { display: contents; }
+  .page[data-page=overview] .status { grid-area: banner; }
+  .page[data-page=overview] .kpis { grid-area: kpis; }
+  .page[data-page=overview] .chart-card { grid-area: chart; }
+  .page[data-page=overview] .quick { grid-area: quick; }
+  .page[data-page=overview] .recent { grid-area: recent; }
+  .recent .ev { grid-template-columns: 64px minmax(0, 1fr) auto; grid-template-areas: "time ti cat" ". de de"; row-gap: 0; align-items: baseline; min-height: 0; padding: 7px 0; }
+  .recent .ev time { grid-area: time; } .recent .ev .ti { grid-area: ti; } .recent .ev .cat { grid-area: cat; } .recent .ev .de { grid-area: de; }
+  .recent .ev .de:empty { display: none; }
+
+  /* Servers: the list on the left; this video's tests and switches on the right. */
+  .page[data-page=routes] .stack { grid-template-columns: minmax(0, 1fr) var(--rail); align-items: start; }
+  .page[data-page=routes] .rec { grid-template-columns: 64px minmax(0, 1fr); row-gap: 2px; }
+  .page[data-page=routes] .rec .out { grid-column: 2; }
+
+  /* Settings: two columns of cards; the four collapsed displays two by two so a preview never clips. */
+  .prefs { max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .prefs > .col { display: grid; gap: 16px; }
+  .prefs .etiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* Log: filters and the list on the left; this page's numbers stacked on the right. */
+  .page[data-page=logs] .stack { grid-template-columns: minmax(0, 1fr) var(--rail); grid-template-areas: "tools stats" "list stats"; align-items: start; }
+  .page[data-page=logs] .logtools { grid-area: tools; }
+  .page[data-page=logs] .loglist { grid-area: list; }
+  .page[data-page=logs] .stats { grid-area: stats; grid-template-columns: 1fr; gap: 18px; }
+}
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }

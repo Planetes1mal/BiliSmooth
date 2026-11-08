@@ -11,6 +11,8 @@ const accentKeys = { blue: 'accentBlue', teal: 'accentTeal', green: 'accentGreen
 const entryKeys = { icon: 'entryIcon', buffer: 'entryBuffer', speed: 'entrySpeed', combined: 'entryCombined' };
 // The preview dot takes the real entry's tone, so Bilibili default reads idle here too.
 const dotClass = { ok: '', warn: 'warn', error: 'err', idle: 'idle' };
+// The two-column width; dashboard.css uses the same media query.
+const WIDE = '(min-width: 1440px)';
 
 export function createSettings(stack, app) {
   const save = key => value => app.save({ [key]: value });
@@ -55,7 +57,18 @@ export function createSettings(stack, app) {
 
   const restore = h('button.btn.danger', { type: 'button', 'data-t': 'restoreDefaults', onclick: restoreDefaults });
   const reset = h('section.card.reset-card', h('div', h('b', { 'data-t': 'restoreDefaults' }), h('p', { 'data-t': 'restoreDetail' })), restore);
-  stack.append(floating, playback, appearance, advanced, reset);
+
+  // Wide windows show two columns: how things look on the left; playback and what Restore defaults resets on
+  // the right. The cards move rather than reorder visually, so reading and Tab order follow what is seen.
+  const wide = matchMedia(WIDE), left = h('div.col'), right = h('div.col');
+  function arrange() {
+    const focused = stack.contains(document.activeElement) ? document.activeElement : null;
+    if (wide.matches) { left.append(floating, appearance); right.append(playback, advanced, reset); stack.replaceChildren(left, right); }
+    else stack.replaceChildren(floating, playback, appearance, advanced, reset);
+    focused?.focus({ preventScroll: true });
+  }
+  arrange();
+  wide.addEventListener('change', arrange);
 
   // Server and playback settings return to defaults; appearance, the collapsed display and the log stay.
   async function restoreDefaults() {
