@@ -12,6 +12,7 @@ import { viewport, viewportMarker, within, corner, snapCandidate, fullscreen, cr
 const POSITION_KEY = 'bilismooth.panel.position.v3';
 const ORDER = { edge: 0, preview: 1, panel: 2 };
 const CORNERS = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
+const SETTLE_MS = 5000;
 const WIDTH = { preview: 256, panel: 312 };
 
 function boot(scope) {
@@ -23,7 +24,7 @@ function boot(scope) {
   let mounted = false, suspended = false, phase = 'edge', view = {}, t = translator('zh'), motionPreference = true;
   let hoverTimer = null, pointerInside = false, previewDismissed = false, touchEntry = false, suppressFocus = false, suppressClickUntil = 0;
   let drag = null, deferredLayout = false, positionAnimation = null, morph = null, morphSerial = 0;
-  let anchor = null, snapped = { x: null, y: null }, preference = 'bottomRight', lastPlacement = null;
+  let anchor = null, snapped = { x: null, y: null }, preference = 'bottomRight', lastPlacement = null, settle = null;
   let menu = null, busy = false, feedback = { text: '', tone: '', kind: '' }, route = '', generation = null, wasFullscreen = false;
   let renderFrame = null, layoutFrame = null, hostSize = '', unsubscribe = null, openingSerial = 0, signature = '';
 
@@ -338,19 +339,32 @@ function boot(scope) {
     host.hidden = false;
     if (WIDTH[phase]) visible().style.width = Math.min(WIDTH[phase], maxWidth / bounds.scaleX) + 'px';
     const measured = host.getBoundingClientRect(), width = measured.width, height = Math.min(measured.height, maxHeight);
-    let at;
+    let at = null, chosen = !anchor;
     if (anchor) {
       if (snapped.x) anchor.x = snapped.x === 'left' ? bounds.left + INSET : bounds.right - INSET;
       if (snapped.y) anchor.y = snapped.y === 'top' ? bounds.top + INSET : bounds.bottom - INSET;
       at = within({ x: anchor.x - (anchor.xSide === 'right' ? width : 0), y: anchor.y - (anchor.ySide === 'bottom' ? height : 0) }, width, height, bounds);
-    } else {
-      const names = [...new Set([preference, 'topRight', 'bottomLeft', 'topLeft'])];
-      at = names.map(name => corner(name, width, height, bounds)).find(candidate => protection.safe(candidate, width, height, bounds)) || corner(preference, width, height, bounds);
+      // The page keeps rendering after the first placement (the header arrives late): while the control settles,
+      // collapsed and untouched, a region that grows under it sends it to another corner.
+      if (settling() && phase === 'edge' && !pointerInside && !protection.safe(at, width, height, bounds)) chosen = true;
+      else if (!settling()) settle = null;
+    }
+    if (chosen) {
+      if (!anchor) settle = { until: scope.performance.now() + SETTLE_MS, x: scope.scrollX, y: scope.scrollY };
+      at = chooseCorner(width, height, bounds);
     }
     showAt(at);
-    captureAnchor(at, !anchor, bounds);
+    captureAnchor(at, chosen, bounds);
     host.dataset.layoutRevision = String((Number(host.dataset.layoutRevision) || 0) + 1);
   }
+  // The preferred corner, then the others; when none is clear, the one that covers the least.
+  function chooseCorner(width, height, bounds) {
+    const candidates = [...new Set([preference, 'topRight', 'bottomLeft', 'topLeft', 'bottomRight'])].map(name => corner(name, width, height, bounds));
+    return candidates.find(candidate => protection.safe(candidate, width, height, bounds))
+      || candidates.reduce((best, candidate) => protection.covered(candidate, width, height) < protection.covered(best, width, height) ? candidate : best);
+  }
+  // Settling ends after SETTLE_MS, on the first scroll, or as soon as the user touches the control.
+  function settling() { return !!settle && scope.performance.now() < settle.until && scope.scrollX === settle.x && scope.scrollY === settle.y; }
   function queueLayout() {
     if (layoutFrame !== null || suspended) return;
     layoutFrame = scope.requestAnimationFrame(() => { layoutFrame = null; syncLifecycle(); if (mounted) place(true); });
@@ -368,6 +382,7 @@ function boot(scope) {
   // ——— Phases ———
   function clearHover() { if (hoverTimer !== null) scope.clearTimeout(hoverTimer); hoverTimer = null; }
   function setPhase(next, { animate = true, focus = false, relayout = true } = {}) {
+    if (next !== 'edge') settle = null;
     if (!mounted || drag || (next !== 'edge' && fullscreen(scope))) return;
     clearHover();
     hideSnapHint();
@@ -450,6 +465,7 @@ function boot(scope) {
     lastPlacement = null;
     closeMenu();
     place(false);
+    settle = null;
     persistPlacement();
     if (!host.hidden) $('more').focus({ preventScroll: true });
   }
@@ -535,6 +551,7 @@ function boot(scope) {
     closeMenu();
     const rect = host.getBoundingClientRect();
     drag = { id: event.pointerId, pointerType: event.pointerType, mover, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top, moved: false };
+    settle = null;
     host.dataset.dragging = 'pending';
     if (event.pointerType === 'mouse') event.preventDefault();
     event.stopPropagation();
@@ -544,11 +561,12 @@ function boot(scope) {
     event.preventDefault();
     clearHover();
     stopPositionAnimation(true);
-    if (event.key === 'Home') { anchor = null; snapped = { x: null, y: null }; preference = 'bottomRight'; lastPlacement = null; place(false); }
+    if (event.key === 'Home') { anchor = null; snapped = { x: null, y: null }; preference = 'bottomRight'; lastPlacement = null; place(false); settle = null; }
     else {
       const rect = host.getBoundingClientRect(), step = event.shiftKey ? 32 : 8;
       moveTo({ x: rect.x + (event.key === 'ArrowRight' ? step : event.key === 'ArrowLeft' ? -step : 0), y: rect.y + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0) });
       captureAnchor(host.getBoundingClientRect(), true);
+      settle = null;
     }
     persistPlacement();
   }
@@ -596,6 +614,7 @@ function boot(scope) {
     listen(host, 'pointerenter', event => {
       if (event.pointerType !== 'mouse') return;
       pointerInside = true;
+      settle = null;
       previewDismissed = false;
       clearHover();
       if (phase === 'edge' && !drag) hoverTimer = scope.setTimeout(() => { if (!drag && phase === 'edge' && !previewDismissed) setPhase('preview'); }, 140);
@@ -681,6 +700,7 @@ function boot(scope) {
       anchor = null; snapped = { x: null, y: null }; preference = 'bottomRight'; lastPlacement = null;
       persistPlacement();
       if (mounted) place(true);
+      settle = null;
       return true;
     },
     open() { syncLifecycle(); if (mounted) { place(true); if (!host.hidden) setPhase('panel', { focus: true }); } },

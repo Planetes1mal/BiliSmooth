@@ -92,6 +92,18 @@ test('mounts collapsed on video paths only (also under /en/), avoids the player,
   await context.close();
 });
 
+test('a header that renders after the first placement sends the collapsed control to a clear corner', async () => {
+  const { page, context, host } = await fixture();
+  await host.waitFor({ state: 'visible' });
+  const before = await rect(host);
+  await page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div class="bili-header" style="position:fixed;left:0;top:0;width:100%;height:64px;background:#fff"><a href="/upload" style="position:absolute;right:16px;top:12px">upload</a></div>'));
+  await page.waitForTimeout(200);
+  const header = await rect(page.locator('.bili-header')), after = await rect(host);
+  assert.ok(overlaps(before, header), 'the first placement sat where the header renders');
+  assert.ok(!overlaps(after, header), 'the control moved off the header');
+  await context.close();
+});
+
 test('unknown and blocked values show — and disable testing; Bilibili default turns routing off without a test', async () => {
   const { page, context, host } = await fixture({ state: { lastMbps: null, bufferWallSeconds: null } });
   await host.waitFor({ state: 'visible' });

@@ -110,8 +110,12 @@ export function createProtection(scope, host, onChange) {
     if (at.x < bounds.left + INSET - 0.5 || at.y < bounds.top + INSET - 0.5 || at.x + width > bounds.right - INSET + 0.5 || at.y + height > bounds.bottom - INSET + 0.5) return false;
     return !rects.some(rect => at.x < rect.right + INSET && at.x + width > rect.left - INSET && at.y < rect.bottom + INSET && at.y + height > rect.top - INSET);
   }
+  // Area of protected regions and controls the rectangle actually covers, for choosing when no corner is clear.
+  function covered(at, width, height) {
+    return rects.reduce((sum, rect) => sum + Math.max(0, Math.min(at.x + width, rect.right) - Math.max(at.x, rect.left)) * Math.max(0, Math.min(at.y + height, rect.bottom) - Math.max(at.y, rect.top)), 0);
+  }
   return {
-    scan, safe, observes: node => observed.has(node),
+    scan, safe, covered, observes: node => observed.has(node),
     observeHost(marker) { resizeObserver?.observe(host); if (marker) resizeObserver?.observe(marker); },
     disconnect() { resizeObserver?.disconnect(); playerObserver.disconnect(); observed.clear(); }
   };
