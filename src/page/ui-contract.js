@@ -25,10 +25,11 @@ export const SAVING_COMMANDS = Object.freeze(['config', 'applyRoute', 'clearData
 //   settingsSave     { status: 'saved' | 'pending' | 'error', error? }
 //   delivery         { status, nativeHost, activeHost, nextTestAt, canTest, comparedHosts } from the kernel
 //   needReload, reloadReasons              whether a settings change needs a page reload, and why
-//   allowedHosts     the fixed-route host list
+//   allowedHosts     the fixed-route host list: the built-in servers, then the user's own (config.customHosts)
 // Full state (the dashboard polls it every 1.2 s) adds: startup, startupHistory, session (per-video delivery record),
 // counters { stalls, frameStalls, recoveries, switches, bytes, videoBytes, audioBytes, totalStallMs }, recoveryAttempts,
 // session.hosts[] also carries measuredAt: the wall time of that host's last measured fragment (null when unknown),
+// session.startHost is the host regional history started the video on (null when it started on Bilibili's address),
 // audioHost, networkEpoch, speedSamples, sampledAt, events (recent log rows).
 export function createRuntimeContract({ version, document, now, wallNow, settings, sync, observer, meta, speed, transfers, episodes, startup, events, kernel, listeners, clone, notify, actions }) {
   function view() {
@@ -43,7 +44,7 @@ export function createRuntimeContract({ version, document, now, wallNow, setting
       lastMbps: speed.mbps(), speedObservedAt: speed.observedAt(), lastTransferAt: transfers.lastTransferAt(),
       mediaGeneration: observer.generation(), startupReady: sync.startupReady(), settingsSave: sync.status(),
       delivery: flags.delivery, needReload: sync.needsReload() || !!flags.needReload, reloadReasons: sync.reloadReasons(),
-      allowedHosts: [...settings.fixedHosts] };
+      allowedHosts: [...settings.fixedHosts, ...config.customHosts] };
   }
   function state() {
     observer.refresh();

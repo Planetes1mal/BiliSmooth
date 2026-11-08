@@ -317,3 +317,50 @@ test('recorded burst-and-stall fragments constrain the current host race estimat
   assert.equal(h.kernel.getState().session.lastRace.verdict, 'current-fastest');
   h.kernel.destroy();
 });
+
+test('automatic playback starts on a trusted history host without probing and returns to the issued addresses after it fails', async () => {
+  const U = 'cn-jxnc-cmcc-bcache-06.bilivideo.com', C = settings.candidatePool[2], cid = '42231991605';
+  const url = (host, id = '30080') => `https://${host}/upgcxcode/1/${cid}-1-${id}.m4s?sign=PRIVATE`;
+  const key = 'bilismooth.delivery-history.v1.' + Intl.DateTimeFormat().resolvedOptions().timeZone + '|en-US';
+  const trusted = host => ({ host, meanBps: 40000000, weight: 2, measuredAt: 99000, failedAt: 0 });
+  const manifest = () => ({ dash: { video: [{ id: 80, bandwidth: 4000000, baseUrl: url(A), backupUrl: [url(B)] }],
+    audio: [{ id: 30280, bandwidth: 128000, baseUrl: url(A, '30280'), backupUrl: [url(B, '30280')] }] } });
+  const random = { Math: Object.assign(Object.create(Math), { random: () => 0.9 }) };
+  for (const [name, config, rows, expected] of [
+    ['user server', { customHosts: [U] }, [trusted(U), { ...trusted(B), meanBps: 20000000 }], U],
+    ['built-in server', {}, [trusted(C)], C],
+    ['switch off', { customHosts: [U], startOnBest: false }, [trusted(U)], A],
+    ['fixed server', { selection: 'fixed', pcdnHost: B, customHosts: [U] }, [trusted(U)], A],
+    ['server no longer listed', {}, [trusted(U)], A],
+    ['one sample only', { customHosts: [U] }, [{ ...trusted(U), weight: 1 }], A]
+  ]) {
+    const pending = [], store = new Map([[key, JSON.stringify({ version: 1, rows })]]);
+    const h = harness({ config, store, globals: random, fetch: (address, init) => new Promise(resolve => pending.push({ address, init, resolve })) });
+    const open = (raw, range) => { const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', raw); if (range) xhr.setRequestHeader('Range', range); xhr.send(); return xhr; };
+    h.scope.__playinfo__ = manifest();
+    assert.equal(new URL(open(url(A, '30280'), 'bytes=0-999').url).hostname, A, name + ': audio before the first video request');
+    const first = open(url(A), 'bytes=0-1048575');
+    assert.equal(new URL(first.url).hostname, expected, name);
+    assert.equal(new URL(open(url(A, '30280'), 'bytes=1000-1999').url).hostname, expected, name + ': audio follows');
+    assert.equal(h.calls.length, 0, name + ': no probe');
+    assert.equal(h.kernel.getState().session.startHost, expected === A ? null : expected, name);
+    if (expected !== A) {
+      assert.equal(h.events.filter(event => event.type === 'route').at(-1).reason, 'history-start', name);
+      first.expire();
+      assert.equal(new URL(open(url(B), 'bytes=0-1048575').url).hostname, B, name + ': the retry takes the native backup');
+      assert.equal(new URL(open(url(A), 'bytes=1048576-2097151').url).hostname, A, name + ': later requests return to the issued host');
+      const saved = JSON.parse(store.get(key)).rows.find(row => row.host === expected);
+      assert.ok(saved.failedAt > 0, name + ': the failure is remembered');
+    }
+    h.kernel.destroy();
+  }
+  // A user server is a race challenger too, ahead of untested built-in servers.
+  const pending = [], h = harness({ config: { customHosts: [U] }, globals: random, fetch: (address, init) => new Promise(resolve => pending.push({ address, init, resolve })) });
+  h.scope.__playinfo__ = manifest();
+  const xhr = new h.scope.XMLHttpRequest(); xhr.open('GET', url(A)); xhr.setRequestHeader('Range', 'bytes=0-1048575'); xhr.send();
+  assert.equal(new URL(xhr.url).hostname, A, 'no history: the issued host');
+  await h.advance(1000); assert.equal(h.kernel.testRoutes(), true);
+  assert.equal(pending.length, 2); assert.equal(new URL(pending[0].address).hostname, U);
+  assert.equal(pending[0].address, url(U)); assert.equal(pending[0].init.credentials, 'omit');
+  h.kernel.destroy();
+});

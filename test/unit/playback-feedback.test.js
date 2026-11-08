@@ -30,3 +30,31 @@ test('regional history ranks only challengers with decay, failure tiers and inde
   const copy=clean.snapshot();copy.rows[0].failedAt=0;assert.notDeepEqual(clean.snapshot(),copy);
   for(const initial of [null,{version:2,rows:h.snapshot().rows},{version:1,rows:'PRIVATE'}])assert.deepEqual(feedback.createHistory({initial}).snapshot(),{version:1,rows:[]});
 });
+test('a video starts on the history host only when that history is recent, repeated, failure-free and clearly faster', () => {
+  const N='upos-sz-mirrorcosov.bilivideo.com', B='upos-sz-mirroraliov.bilivideo.com', U='cn-jxnc-cmcc-bcache-06.bilivideo.com', K='upos-hz-mirrorakam.akamaized.net';
+  const hour=3600000, day=24*hour, base=10*day, required=4000000;
+  const row=(host, mbps, extra={}) => ({ host, meanBps: mbps*1e6, weight: 2, measuredAt: base-hour, failedAt: 0, ...extra });
+  const start=(rows, candidates=[N,B,U,K], at=base) => feedback.createHistory({ now: () => at, initial: { version: 1, rows } })
+    .startHost(candidates, { current: N, requiredBps: required });
+  for (const [name, rows, expected, candidates] of [
+    ['issued host unknown, best is fast enough', [row(B, 30)], B],
+    ['user server with good history', [row(B, 20), row(U, 40)], U],
+    ['no history', [], null],
+    ['a single sample', [row(B, 30, { weight: 1 })], null],
+    ['measured over a day ago', [row(B, 30, { measuredAt: base - day - 1 })], null],
+    ['failed within a day', [row(B, 30, { failedAt: base - 20 * hour })], null],
+    ['under twice the bitrate', [row(B, 7.9)], null],
+    ['issued host measured and not clearly slower', [row(B, 30), row(N, 21)], null],
+    ['issued host measured and clearly slower', [row(B, 30), row(N, 20)], B],
+    ['issued host failed within the hour', [row(B, 30), row(N, 40, { failedAt: base - 1000 })], B],
+    ['the issued host is the best', [row(N, 50), row(B, 30)], null],
+    ['only listed candidates', [row(B, 30)], null, [N, U]]
+  ]) assert.equal(start(rows, candidates), expected, name);
+  const h=feedback.createHistory({ now: () => base, initial: { version: 1, rows: [row(B, 30)] } });
+  assert.equal(h.startHost([N,B], { current: N, requiredBps: 0 }), null, 'an unknown bitrate starts nowhere else');
+  const ties=feedback.createHistory({ now: () => base, random: () => 0.9 });
+  assert.deepEqual(ties.challengers([B, 'upos-sz-mirrorali.bilivideo.com', U], [U]), [U, 'upos-sz-mirrorali.bilivideo.com'], 'a user server wins ties');
+  ties.recordRace([{ host: U, ok: true, bytes: 125000, elapsedMs: 1000 }, { host: B, ok: true, bytes: 1250000, elapsedMs: 1000 }]);
+  assert.deepEqual(ties.challengers([B, U], [U]), [B, U], 'a measured slow user server ranks by speed');
+  assert.equal(ties.snapshot().rows.some(item => item.host === U), true, 'user server history persists');
+});

@@ -8,8 +8,9 @@ function identity(raw) {
   const key = raw.split(/[?#]/)[0].split('/').at(-1), match = /^(\d+)[-_].*\.(?:m4s|mp4|flv)$/i.exec(key);
   return match ? { cid: match[1], key } : null;
 }
+// pool: the hosts a signed UPOS address may be rendered on (built-in and user-added), or a function returning them.
 export function create({ pool = settings.candidatePool } = {}) {
-  const catalog = createCatalog(), policy = createPolicy(), sessions = new Map();
+  const catalog = createCatalog(), policy = createPolicy(), sessions = new Map(), hosts = typeof pool === 'function' ? pool : () => pool;
   let currentCid = null;
   function collect(payload) {
     for (const track of catalog.collect(payload)) {
@@ -46,9 +47,14 @@ export function create({ pool = settings.candidatePool } = {}) {
     const representation = get(raw);
     if (!representation) return null;
     if (representation.urls.has(host)) return representation.urls.get(host);
-    if (!pool.includes(host) || !upos(host)) return null;
+    if (!hosts().includes(host) || !settings.isCdnHost(host)) return null;
     const source = [...representation.urls].find(([issuedHost]) => upos(issuedHost));
     return source ? renderAddress(source[1], host) : null;
+  }
+  // Every host the representation of `raw` can be fetched from: issued addresses first, then the pool.
+  function candidates(raw) {
+    const representation = get(raw);
+    return representation ? [...new Set([...representation.urls.keys(), ...hosts()])].filter(host => addressForHost(raw, host)) : [];
   }
   function snapshot() {
     const session = current();
@@ -56,7 +62,7 @@ export function create({ pool = settings.candidatePool } = {}) {
       representations: [...session.representations.values()].map(rep => ({ id: rep.id, kind: rep.kind, bandwidth: rep.bandwidth,
         codecs: rep.codecs, codecId: rep.codecId, issuedHosts: [...rep.urls.keys()] })) } : null;
   }
-  return { collect, request, addressForHost, get, current, snapshot };
+  return { collect, request, addressForHost, candidates, get, current, snapshot };
 }
 const deliverySession = Object.freeze({ create });
 export default deliverySession;

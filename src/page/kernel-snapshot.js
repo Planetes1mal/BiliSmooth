@@ -20,7 +20,7 @@ export function createSnapshots({ document, wallNow, nativeFetch, config, active
     return session ? { ...session, hosts: ledger.measurements.get(session.cid)?.snapshot() || [],
       nativeHost: current.nativeHost || null, switchCount: row.switchCount, nextTestAt: row.nextTestAt, nextAutomaticAt: row.nextAutomaticAt,
       races: plainCopy(row.races), switches: plainCopy(row.switches),
-      activeHost: current.activeEpoch === ledger.epoch() ? current.activeHost : null,
+      activeHost: current.activeEpoch === ledger.epoch() ? current.activeHost : null, startHost: current.startHost || null,
       syntheticTimeouts: { ...interceptor().syntheticStatus(), events: plainCopy(syntheticHistory.get(session.cid) || []) },
       racing: race.racingVideo() === session.cid, lastRace: current.lastRace ? plainCopy(current.lastRace) : null } : null;
   }

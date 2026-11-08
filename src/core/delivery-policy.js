@@ -16,6 +16,9 @@ export const constants = Object.freeze({
   RACE_SPEEDUP: 1.5, SYNTHETIC_TIMEOUTS_PER_RANGE: 1, SYNTHETIC_RETRY_CHECK_MS: 3000,
   RACE_COOLDOWN_MS: 10000, RACE_COOLDOWN_MULTIPLIER: 2, MAX_SWITCHES_PER_VIDEO: 4,
   HISTORY_INPUT_MAX_ROWS: 64, HISTORY_HALF_LIFE_MS: 3 * 24 * 60 * 60 * 1000, HISTORY_FAILURE_MS: 60 * 60 * 1000,
+  // Starting a video on a host from regional history: measured within a day, at least two race samples,
+  // no failure within a day, at least twice the video's bitrate, and RACE_SPEEDUP over the issued host when it was measured.
+  START_HISTORY_MAX_AGE_MS: 24 * 60 * 60 * 1000, START_HISTORY_MIN_WEIGHT: 1.5, START_FAILURE_MS: 24 * 60 * 60 * 1000, START_RATE_FACTOR: 2,
   EXPLORATION_SHARE: 1 / 5
 });
 // Why a video request should trigger a race: 'stuck', 'shortfall', 'errors' or null.

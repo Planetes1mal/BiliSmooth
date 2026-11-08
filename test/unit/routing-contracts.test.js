@@ -22,6 +22,28 @@ test('settings v4 is the single default authority and cannot be replaced by an u
   assert.equal(config.maxDepth, 20);
 });
 
+test('user servers accept UPOS and bcache hosts only, never shared ones, and stay a short saved list', () => {
+  const bcache = 'cn-jxnc-cmcc-bcache-06.bilivideo.com', describe = policy.createPolicy().describe;
+  for (const host of [bcache, 'CN-HK-EQ-BCACHE-01.bilivideo.cn', 'upos-sz-mirrorcos.bilivideo.net', 'https://upos-sz-mirrorcustom.bilivideo.com/']) {
+    assert.equal(settings.isCdnHost(host), true, host);
+    const clean = settings.patch({ pcdnHost: host }).pcdnHost, facts = describe(media(clean));
+    assert.equal(facts.distribution && !facts.shared && !facts.relaySource, true, host);
+  }
+  for (const host of ['upos-sz-302ppio.bilivideo.com', 'upos-sz-mirror14b.bilivideo.com', 'cn-jxnc-cmcc-bcache-06.mcdn.bilivideo.cn',
+    'cn-jxnc-cmcc-bcache-06.bilivideo.com:8082', 'cn-jxnc-cmcc-bcache-06.bilivideo.com/path', 'cn-jxnc-cmcc-bcache-06.akamaized.net',
+    'cn-jxnc-cmcc-bcache-06.example.com', 'cn-jxnc-cmcc-01-06.bilivideo.com', 'xy1x2x3x4xy.mcdn.bilivideo.cn', 'upos-hz-mirrorakam.akamaized.net',
+    'node.mountaintoys.cn', '192.0.2.1', 'cn-1.2.3-bcache-06.bilivideo.com'])
+    assert.equal(settings.isCdnHost(host), false, host);
+  const many = Array.from({ length: 12 }, (_, index) => `upos-sz-mirror${index}x.bilivideo.com`);
+  const config = settings.normalize({ customHosts: [' ' + bcache.toUpperCase(), bcache, A, 'upos-sz-302ppio.bilivideo.com', 42, ...many] });
+  assert.deepEqual(config.customHosts, [bcache, ...many.slice(0, settings.customHostsMax - 1)]);
+  assert.equal(config.customHosts.length, 8);
+  assert.deepEqual(settings.normalize({}).customHosts, []); assert.equal(settings.normalize({}).startOnBest, true);
+  assert.equal(settings.normalize({ startOnBest: false }).startOnBest, false);
+  assert.equal(settings.normalize({ selection: 'fixed', pcdnHost: bcache }).pcdnHost, bcache);
+  assert.equal(settings.normalize({ selection: 'fixed', pcdnHost: 'upos-sz-302ppio.bilivideo.com' }).selection, 'auto');
+});
+
 test('restricted routing replaces shared delivery addresses while preserving healthy, live and analytics URLs', () => {
   const route = policy.createPolicy({ selection: 'fixed', pcdnHost: B }).route;
   for (const host of ['upos-sz-302ppio.bilivideo.com', 'upos-sz-mirror14b.bilivideo.com',

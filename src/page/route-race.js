@@ -21,9 +21,9 @@ export function createRaceCoordinator({ root, document, now, wallNow, nativeFetc
     const end = request.completedAt ? start + C.RACE_SAMPLE_BYTES - 1 : Math.min(Number(match[2]), start + C.RACE_SAMPLE_BYTES - 1);
     if (start > end) return false;
     const rep = delivery.get(request.originalUrl), currentHost = request.host;
-    const candidates = [...new Set([...rep.urls.keys(), ...config().candidatePool])].filter(host => host !== currentHost)
+    const candidates = [...new Set([...rep.urls.keys(), ...config().candidatePool, ...config().customHosts])].filter(host => host !== currentHost)
       .map(host => ({ host, url: delivery.addressForHost(request.originalUrl, host) })).filter(target => target.url);
-    const targets = history.challengers(candidates.map(target => target.host)).map(host => candidates.find(target => target.host === host));
+    const targets = history.challengers(candidates.map(target => target.host), config().customHosts).map(host => candidates.find(target => target.host === host));
     if (!targets.length) return false;
     const measured = ledger.measurementFor(session.cid, currentHost);
     const sustained = measured?.goodputBps ? Math.min(measured.goodputBps, measured.recentBps) : 0;

@@ -27,7 +27,7 @@ export function createKernel(options = {}) {
   let config = settings.normalize(options.config), policy = createPolicy(config), destroyed = false;
   const initialGuard = config.p2pGuard;
   const state = { rewriteCount: 0, lastMediaHost: null, needReload: false };
-  const delivery = createDeliverySession({ pool: config.candidatePool }), syntheticHistory = new Map();
+  const delivery = createDeliverySession({ pool: () => [...config.candidatePool, ...config.customHosts] }), syntheticHistory = new Map();
   const active = () => !destroyed && config.enabled && config.mode !== 'off';
   function emit(event) { if (!destroyed) try { options.onEvent?.({ at: wallNow(), ...event }); } catch {} }
   const log = (type, details = {}) => emit({ type, ...details });
@@ -59,7 +59,7 @@ export function createKernel(options = {}) {
   race = createRaceCoordinator({ root, document, now, wallNow, nativeFetch, config: () => config, active, delivery, ledger, history,
     saveHistory: store.save, log, interceptor: () => interceptor, watchedVideo: () => monitor.watched() });
   monitor = createDeliveryMonitor({ root, document, now, wallNow, config: () => config, active, delivery, ledger, race, playbackEvidence, getPlayer: options.getPlayer, log });
-  const router = createRouter({ config: () => config, policy: () => policy, delivery, ledger, state, log, emit, plainCopy, hostOf, onPayload: () => race.stopIfOtherVideo() });
+  const router = createRouter({ config: () => config, policy: () => policy, delivery, ledger, history, state, log, emit, plainCopy, hostOf, onPayload: () => race.stopIfOtherVideo() });
   const views = createSnapshots({ document, wallNow, nativeFetch, config: () => config, active, delivery, ledger, race, interceptor: () => interceptor, plainCopy, syntheticHistory, state });
 
   function beginRequest(info) {
