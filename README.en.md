@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/github/v/release/Planetes1mal/BiliSmooth?color=0f766e&label=version)](https://github.com/Planetes1mal/BiliSmooth/releases/latest)
 [![License](https://img.shields.io/github/license/Planetes1mal/BiliSmooth?color=64748b)](./LICENSE)
 
-Switch CDN routes for Bilibili videos and see download speed and buffered time beside the player.
+Switch the CDN server for Bilibili videos and see download speed and buffered time beside the player.
 
 [Download](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [Changelog](./CHANGELOG.md) · [Report an issue](https://github.com/Planetes1mal/BiliSmooth/issues)
 
@@ -17,10 +17,10 @@ https://github.com/user-attachments/assets/1762be9f-cad5-4ae4-a497-8712c9d600e6
 
 - **Status beside the video:** see download speed, buffered time and the active server in a control you can drag, dock or collapse.
 - **Buffer adjusted for playback speed:** 20 seconds of buffered video shows as about 10 seconds at 2× speed.
-- **Automatic or manual routing:** let BiliSmooth select a CDN or keep a fixed route. Try an alternate route when playback stalls.
-- **A separate dashboard:** view download history and route information, adjust settings, and choose Chinese or English with a light or dark theme.
+- **Automatic or manual server choice:** let BiliSmooth pick a CDN server or keep a fixed one. Try another server when playback stalls.
+- **A separate dashboard:** view download history and server information, adjust settings, and choose Chinese or English with a light or dark theme.
 
-<img src="https://raw.githubusercontent.com/Planetes1mal/BiliSmooth/main/docs/images/dashboard.png" width="960" alt="BiliSmooth dashboard showing playback status, download history and route information">
+<img src="https://raw.githubusercontent.com/Planetes1mal/BiliSmooth/main/docs/images/dashboard.png" width="960" alt="BiliSmooth dashboard showing playback status, download history and server information">
 
 ## Install
 
@@ -47,9 +47,9 @@ Download the BiliSmooth installation ZIP, rather than GitHub's **Source code** a
 
 Open a Bilibili video as usual. The server is set to “Automatic” by default. Hover over the floating control for metrics, or click it to choose a server or test speed. Choosing a fixed server pauses automatic switching. Choose what the collapsed control shows in the dashboard's settings.
 
-To return to the site's original routing, choose “Bilibili default” in the floating control and refresh the page when prompted.
+To go back to Bilibili's own server choice, choose “Bilibili default” in the floating control and refresh the page when prompted.
 
-BiliSmooth preserves the quality selected in the player. It does not unlock paid quality options or bypass regional restrictions. Route performance varies with your network.
+BiliSmooth preserves the quality selected in the player. It does not unlock paid quality options or bypass regional restrictions. Server performance varies with your network.
 
 ## Privacy
 
