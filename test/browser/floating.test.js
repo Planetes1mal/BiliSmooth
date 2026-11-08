@@ -153,6 +153,16 @@ test('test speed, save failure and retry, opening the dashboard', async () => {
   assert.equal(await shadow(page, '#feedback'), '正在测速…');
   await mutate(page, () => { fixture.state.delivery = { ...fixture.state.delivery, status: 'current-fastest', activeHost: 'upos-sz-mirrorcosov.bilivideo.com' }; fixture.notify(); });
   assert.equal(await shadow(page, '#feedback'), '测速完成，腾讯云海外最快');
+  await mutate(page, () => { fixture.state.delivery = { ...fixture.state.delivery, status: 'testing' }; fixture.notify(); });
+  await mutate(page, () => { fixture.state.delivery = { ...fixture.state.delivery, status: 'switched', activeHost: 'upos-sz-mirroraliov.bilivideo.com' }; fixture.notify(); });
+  assert.equal(await shadow(page, '#feedback'), '测速完成，腾讯云海外最快', 'a later automatic test does not replace the result');
+  await mutate(page, () => { fixture.state.mediaGeneration = 2; fixture.notify(); });
+  assert.equal(await shadow(page, '#feedback'), '', 'a new video clears the result');
+  await mutate(page, () => { fixture.state.reloadReasons = ['storage-read-failed']; fixture.notify(); });
+  assert.equal(await shadow(page, '#feedback'), '设置还没同步，可以在仪表盘重新连接。');
+  await mutate(page, () => { fixture.state.reloadReasons = []; fixture.notify(); });
+  assert.equal(await shadow(page, '#feedback'), '', 'the read failure clears once settings read again');
+  await page.evaluate(() => BiliSmoothFloating.open());
   await page.evaluate(() => { fixture.fail = true; });
   await host.locator('#server').click();
   await host.locator('#server-menu [data-choice="default"]').click(); await page.waitForTimeout(80);

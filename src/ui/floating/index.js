@@ -25,7 +25,7 @@ function boot(scope) {
   let hoverTimer = null, pointerInside = false, previewDismissed = false, touchEntry = false, suppressFocus = false, suppressClickUntil = 0;
   let drag = null, deferredLayout = false, positionAnimation = null, morph = null, morphSerial = 0;
   let anchor = null, snapped = { x: null, y: null }, preference = 'bottomRight', lastPlacement = null, settle = null;
-  let menu = null, busy = false, feedback = { text: '', tone: '', kind: '' }, route = '', generation = null, wasFullscreen = false;
+  let menu = null, busy = false, feedback = { text: '', tone: '', kind: '' }, route = '', generation = null, wasFullscreen = false, testSeen = false;
   let renderFrame = null, layoutFrame = null, hostSize = '', unsubscribe = null, openingSerial = 0, signature = '';
 
   try {
@@ -160,7 +160,7 @@ function boot(scope) {
     view.config ||= runtime.getConfig();
     const config = view.config;
     t = translator(config.lang);
-    if (generation !== null && view.mediaGeneration != null && generation !== view.mediaGeneration) { generation = view.mediaGeneration; setPhase('edge', { animate: false }); }
+    if (generation !== null && view.mediaGeneration != null && generation !== view.mediaGeneration) { generation = view.mediaGeneration; setPhase('edge', { animate: false }); clearTestFeedback(); }
     else if (view.mediaGeneration != null) generation = view.mediaGeneration;
     host.dataset.theme = config.theme === 'dark' || (config.theme !== 'light' && darkQuery.matches) ? 'dark' : 'light';
     host.dataset.accent = settings.accents?.includes(config.accent) ? config.accent : 'blue';
@@ -218,14 +218,19 @@ function boot(scope) {
     $('grip').title = t('moveHint');
     for (const node of shadow.querySelectorAll('[data-corner]')) node.setAttribute('aria-current', String(!anchor && node.dataset.corner === preference));
 
-    // Feedback: an action's result, a pending speed test, or a settings read failure.
+    // Feedback: an action's result, the speed test the user started, or a settings read failure. A test result is
+    // taken only after that test was seen running, then kept as it is, so a later automatic test never shows as it.
     if (feedback.kind === 'test') {
       const result = testResult(view, t, value => format.serverName(value, config.lang));
-      if (result) setFeedback(result.text, result.key === 'testing' ? '' : 'ok', 'test');
+      if (result?.key === 'testing') testSeen = true;
+      else if (result && testSeen) setFeedback(result.text, 'ok', 'test-done');
     }
-    if (!feedback.text && view.reloadReasons?.includes('storage-read-failed')) setFeedback(t('readFailedPanel'), 'error', 'read');
+    const readFailed = view.reloadReasons?.includes('storage-read-failed');
+    if (!feedback.text && readFailed) setFeedback(t('readFailedPanel'), 'error', 'read');
+    else if (feedback.kind === 'read' && !readFailed) setFeedback('', '', '');
     syncMotion();
   }
+  function clearTestFeedback() { if (feedback.kind === 'test' || feedback.kind === 'test-done') setFeedback('', '', ''); }
   function setFeedback(text, tone = '', kind = 'action') {
     feedback = { text, tone, kind };
     const node = $('feedback');
@@ -490,6 +495,7 @@ function boot(scope) {
         else if (!runtime.applyRoute(value)) throw new Error('invalid-route');
         await runtime.flushSettings();
       } else if (name === 'test') {
+        testSeen = false;
         if (runtime.retry()) setFeedback(t('testing'), '', 'test');
         else setFeedback(t('testUnavailable'), '', 'action');
       } else if (name === 'clear') {
@@ -686,6 +692,7 @@ function boot(scope) {
     }
     if (changed) {
       generation = null; lastPlacement = null;
+      clearTestFeedback();
       setPhase('edge', { animate: false, relayout: false });
       render();
       queueLayout();
