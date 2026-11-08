@@ -9,7 +9,7 @@
 
 [下载](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [更新记录](./CHANGELOG.md) · [反馈问题](https://github.com/Planetes1mal/BiliSmooth/issues)
 
-https://github.com/user-attachments/assets/d294164e-1db2-44fa-a2ce-4c6ccb0a3f65
+https://github.com/user-attachments/assets/c510664c-1c48-4a24-bd5c-835d738e389e
 
 *演示画面：《Spring》© Blender Foundation | [cloud.blender.org/spring](https://cloud.blender.org/spring)，[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。*
 

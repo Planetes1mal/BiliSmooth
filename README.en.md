@@ -9,7 +9,7 @@ Switch the CDN server for Bilibili videos and see download speed and buffered ti
 
 [Download](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [Changelog](./CHANGELOG.md) · [Report an issue](https://github.com/Planetes1mal/BiliSmooth/issues)
 
-https://github.com/user-attachments/assets/1762be9f-cad5-4ae4-a497-8712c9d600e6
+https://github.com/user-attachments/assets/b77ef928-578d-4daf-9b2a-bfd4483d183d
 
 *Footage: Spring © Blender Foundation | [cloud.blender.org/spring](https://cloud.blender.org/spring), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).*
 
