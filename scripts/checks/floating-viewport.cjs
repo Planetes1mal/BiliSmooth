@@ -2,12 +2,14 @@
 // The helper extension sets real per-tab browser zoom. It has no production role.
 const fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto');
 const { chromium } = require('playwright');
+const { build } = require('esbuild');
 const { createEvidenceOutput, runLabel } = require('../lib/evidence.cjs');
 const root = path.resolve(__dirname, '../..');
 const version = require('../../package.json').version;
 const label = runLabel() || 'current';
 const output = createEvidenceOutput({ root, suite: 'viewport' });
-const sources = ['dist/extension/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js', 'src/page/floating-control.js'];
+// The floating control is bundled from source exactly as scripts/build.mjs does; the last entry is that bundle.
+const sources = ['dist/extension/settings.js', 'src/ui/motion-runtime.js', 'src/ui/floating/index.js'];
 const specs = [
   { name: 'classic-scrollbar', gutter: 'auto' },
   { name: 'stable-scrollbar', gutter: 'stable' },
@@ -62,7 +64,7 @@ async function measure(page) {
       top: Math.max(fixed.top, visual.top), bottom: Math.min(fixed.bottom, visual.bottom) };
     const outside = box => box.left < drawable.left - .75 || box.right > drawable.right + .75 || box.top < drawable.top - .75 || box.bottom > drawable.bottom + .75;
     const visible = node => node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0 && node.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
-    const controls = [...shadow.querySelectorAll('button,.bs-switch-track,.bs-status-signal,.bs-entry-face,.bs-entry-logo,.bs-unit')].filter(visible).map(node => ({
+    const controls = [...shadow.querySelectorAll('button,.dot,.mk,.ic,.brand-tile,small')].filter(visible).map(node => ({
       node: node.id || node.className || node.tagName, rect: rect(node.getBoundingClientRect())
     }));
     // Range geometry is clipped only by ancestor overflow, never by the viewport
@@ -96,7 +98,8 @@ async function measure(page) {
 (async () => {
   await fs.mkdir(output, { recursive: true });
   if (await fs.stat(path.join(output, 'report.json')).catch(() => null)) throw Error('Report label already exists; choose a new --label to preserve evidence');
-  const code = new Map(await Promise.all(sources.map(async file => [file, await fs.readFile(path.join(root, file), 'utf8')])));
+  const bundleFloating = async file => (await build({ absWorkingDir: root, entryPoints: [file], bundle: true, format: 'iife', platform: 'browser', target: ['chrome120'], write: false, loader: { '.css': 'text', '.svg': 'text' } })).outputFiles[0].text;
+  const code = new Map(await Promise.all(sources.map(async file => [file, file.endsWith('floating/index.js') ? await bundleFloating(file) : await fs.readFile(path.join(root, file), 'utf8')])));
   const hashes = Object.fromEntries([...code].map(([file, text]) => [file, crypto.createHash('sha256').update(text).digest('hex')]));
   const helper = path.join(output, 'zoom-helper'); await fs.mkdir(helper, { recursive: true });
   await fs.writeFile(path.join(helper, 'manifest.json'), JSON.stringify({ manifest_version: 3, name: 'Local viewport test', version: '1.0',
@@ -131,7 +134,7 @@ async function measure(page) {
         if (phase === 'preview') {
           // Focus is a genuine supported reveal path and does not depend on an
           // already-clipped pointer target being clickable.
-          await page.locator('#bs-edge').focus();
+          await page.locator('#bilismooth-floating #entry').focus();
         } else if (phase === 'panel') await page.evaluate(() => BiliSmoothFloating.open());
         await page.evaluate(() => viewportFixture.notify());
         await page.waitForTimeout(70);

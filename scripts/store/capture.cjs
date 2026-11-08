@@ -16,9 +16,9 @@ async function main() {
 Build the extension first with npm run build. Requires Playwright Chromium.
 Captures the actual extension in a fresh local/tmp/store-capture-* browser profile
 and saves four store screenshots as local/store/listing/<locale>/screenshots/01-04.png
-(floating control, dashboard, routes, preferences). The English run also refreshes
+(floating control, overview, servers, settings). The English run also refreshes
 docs/images/dashboard.png for the README; --locale=zh-CN leaves README images unchanged.
-Use npm run demo:record separately to record the README video.
+Use npm run store:demo separately to record the README video.
 The video page and cover are served locally from scripts/fixtures/store-demo.html
 and docs/images/test-video.png. Remote web requests are blocked. Playback uses a
 local canvas stream, so these images demonstrate the UI, not CDN performance.
@@ -62,7 +62,7 @@ This command does not upload or publish anything.`);
     await worker.evaluate(async language => {
       const key = 'bilismooth.config.v4';
       const old = (await chrome.storage.local.get(key))[key] || {};
-      await chrome.storage.local.set({ [key]: { ...old, lang: language, theme: 'light', accent: 'teal' } });
+      await chrome.storage.local.set({ [key]: { ...old, lang: language, theme: 'light', accent: 'blue' } });
     }, language);
     const page = await context.newPage();
     for (const old of context.pages()) if (old !== page) await old.close();
@@ -84,10 +84,10 @@ This command does not upload or publish anything.`);
     await page.mouse.move(700, 740); await page.waitForTimeout(1200);
     await fs.mkdir(assets, { recursive: true });
     await fs.mkdir(images, { recursive: true });
-    await host.locator('#bs-edge').hover(); await host.locator('#bs-move').click();
+    await host.locator('#entry').hover(); await page.waitForTimeout(400); await host.locator('#preview').click();
     await page.mouse.move(700, 100); await page.waitForTimeout(700);
     await page.screenshot({ path: shot(1), omitBackground: false });
-    await host.locator('#bs-close').click(); await page.mouse.click(200, 110); await page.mouse.move(10, 790);
+    await page.evaluate(() => { BiliSmoothFloating.collapse(); BiliSmoothFloating.collapse(); }); await page.mouse.move(10, 790);
 
     const id = new URL(worker.url()).hostname;
     const sourceId = await worker.evaluate(async actualURL => {
@@ -96,9 +96,9 @@ This command does not upload or publish anything.`);
     }, page.url());
     const control = await context.newPage();
     await control.goto(`chrome-extension://${id}/control/index.html?tab=${sourceId}`);
-    await control.waitForFunction(() => window.BiliSmoothView?.getSnapshot().startupReady &&
-      document.querySelector('#video-title')?.textContent === 'Test video' &&
-      document.querySelector('#video-cover')?.complete && document.querySelector('#video-cover')?.naturalWidth > 0);
+    await control.waitForFunction(() => window.BiliSmoothView?.getSnapshot()?.startupReady &&
+      document.querySelector('#picker .title')?.textContent === 'Test video' &&
+      document.querySelector('#picker img')?.complete && document.querySelector('#picker img')?.naturalWidth > 0);
     const controlId = await control.evaluate(() => new Promise(resolve => chrome.tabs.getCurrent(tab => resolve(tab.id))));
     await worker.evaluate(async tab => chrome.tabs.setZoom(tab, 0.85), controlId);
     await control.waitForTimeout(2000);
@@ -109,10 +109,10 @@ This command does not upload or publish anything.`);
     await control.locator('nav [data-page="settings"]').click(); await control.waitForTimeout(700);
     await control.screenshot({ path: shot(4), omitBackground: false });
     console.log(JSON.stringify({ stage: 'dashboard', language: await control.locator('html').getAttribute('lang'),
-      title: await control.locator('#video-title').innerText() }));
+      title: await control.locator('#picker .title').innerText() }));
     const details = {
       version: initial.manifest.version, language, locale, page: demoURL, cover: demoImageURL,
-      title: await control.locator('#video-title').innerText(),
+      title: await control.locator('#picker .title').innerText(),
       mediaSource: 'Locally rendered canvas stream; no CDN performance samples.',
       blockedRequests: [...blockedRequests]
     };
