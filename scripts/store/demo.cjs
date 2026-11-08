@@ -124,6 +124,8 @@ function retimeMP4(buffer) {
 // (CC BY 4.0), in a fresh signed-out profile. The video tab and the dashboard tab are each recorded with tab
 // capture on one clock, then cut together with a drawn pointer, a camera, one caption per scene and the credit.
 const VIDEO = 'BV1Yb411g7VV';
+// GitHub refuses README video attachments over 10 MB on free plans; the recorder overshoots its requested bitrate.
+const MAX_BYTES = 10_000_000, BITRATE = 700000;
 const SCENE_START = 95;
 // Other people's videos and ads in the recommendation column, the sign-in prompt and danmaku stay out of frame.
 const PAGE_CSS = '.right-container, .bpx-player-toast-wrap, .bpx-player-render-dm-wrap, .bpx-player-dm-wrap, .bili-mini-mask,'
@@ -367,7 +369,7 @@ async function compose({ clips, timeline, locale, out }) {
       new Promise((_, reject) => setTimeout(() => reject(new Error(`Rendering did not finish within ${limit / 1000} s.`)), limit).unref()),
       page.evaluate(args => window.renderDemo(args), {
         sources: Object.entries(timeline.offsets).map(([id, offset]) => ({ id, url: base + id + '.mp4', offset })),
-        timeline, brandURL: base + 'brand.png', lang: locale, outputWidth: 1440, outputHeight: 900, bitrate: 2400000
+        timeline, brandURL: base + 'brand.png', lang: locale, outputWidth: 1440, outputHeight: 900, bitrate: BITRATE
       })]);
     const raw = Buffer.from(composed.base64, 'base64');
     await fs.writeFile(path.join(out, 'composed.mp4'), raw);
@@ -393,6 +395,7 @@ Writes local/store/readme-demo/floating-demo-preview.mp4 (Chinese).
 With --locale=en, records the /en/ page and writes floating-demo-preview-en.mp4.
 Raw clips, the timeline and capture details remain under local/tmp/demo-video-*;
 --from=<that folder> composes them again without recording (captions come from this script).
+Each video stays under GitHub's 10 MB attachment limit, or the command fails.
 This command leaves README and store assets unchanged. Review the local video
 before uploading an attachment or replacing the README demonstration.`);
     return;
@@ -449,6 +452,7 @@ before uploading an attachment or replacing the README demonstration.`);
     console.log(JSON.stringify({ stage: 'compose', attempt, seconds: result.timing.seconds, note: 'lost frames, composing again' }));
     if (attempt === 2) throw new Error(`The composed clip lost too many frames twice; compose again with --from=${out}.`);
   }
+  if (result.mp4.length > MAX_BYTES) throw new Error(`The video is ${result.mp4.length} bytes, over GitHub's ${MAX_BYTES}-byte attachment limit; lower BITRATE and compose again with --from=${out}.`);
   const output = path.join(local.store, 'readme-demo', `floating-demo-preview${suffix}.mp4`);
   await fs.mkdir(path.dirname(output), { recursive: true });
   await fs.writeFile(output, result.mp4);
