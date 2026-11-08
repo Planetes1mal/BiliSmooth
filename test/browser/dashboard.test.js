@@ -44,7 +44,7 @@ function install({ version, state, config, tabs }) {
       async reload(id) { fx.reloads.push(id); },
       async sendMessage(tabId, message) {
         fx.calls.push({ tabId, ...clone(message) });
-        if (['config', 'applyRoute'].includes(message.action) && fx.failConfig) return { ok: false, error: 'settings-save-failed' };
+        if (['config', 'applyRoute', 'reload'].includes(message.action) && fx.failConfig) return { ok: false, error: 'settings-save-failed' };
         if (message.action === 'config') Object.assign(fx.config, message.patch);
         if (message.action === 'applyRoute') Object.assign(fx.config, { enabled: true, selection: 'fixed', pcdnHost: message.patch.host });
         return reply();
@@ -146,6 +146,13 @@ test('a failed save is shown, rolled back and retried', async t => {
   await notice.waitFor({ state: 'hidden' });
   assert.equal(await ports.isChecked(), false);
   assert.deepEqual((await sent(page, 'config')).map(call => call.patch), [{ portHeuristic: false }, { portHeuristic: false }]);
+});
+
+test('a reload whose save fails says the video was not reloaded', async t => {
+  const page = await open(t, { overrides: { needReload: true, reloadReasons: ['playinfo-config'] } });
+  await page.evaluate(() => { fx.failConfig = true; });
+  await page.locator('#notice').getByRole('button', { name: '刷新视频页' }).click();
+  await page.getByText('设置没有确认保存，视频页没有刷新。').waitFor();
 });
 
 test('an outdated tab asks for a reload; without a tab settings go to the background', async t => {

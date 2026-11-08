@@ -69,11 +69,11 @@ function retrySave() {
   return save({});
 }
 // A one-off command from a button; the key keeps the button busy while it runs.
-async function act(key, action, patch) {
+async function act(key, action, patch, failed = 'actionFailed') {
   if (busy.has(key)) return null;
   busy.add(key); queueRender();
   try { return await conn.command(action, patch); }
-  catch (error) { if (error?.message !== 'selection-changed') toast(t('actionFailed'), 'bad'); return null; }
+  catch (error) { if (error?.message !== 'selection-changed') toast(t(failed), 'bad'); return null; }
   finally { busy.delete(key); queueRender(); }
 }
 async function test() {
@@ -81,7 +81,8 @@ async function test() {
   if (result && result.retryAttempted === false) toast(t('testUnavailable'));
 }
 async function reloadWithSettings() {
-  const result = await act('reload', 'reload');
+  // The save before the reload can fail; the tab then stays as it is.
+  const result = await act('reload', 'reload', undefined, 'reloadFailed');
   if (result?.retryAttempted) conn.expectReload(); else if (result) toast(t('reloadFailed'), 'bad');
 }
 async function exportDiagnostics() {
