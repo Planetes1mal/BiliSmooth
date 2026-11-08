@@ -1,13 +1,13 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const core = require('../../src/core/routing-policy.js');
-const settings = require('../../src/core/settings.js');
-const Kernel = require('../../src/page/playback-kernel.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import loadKernel from '../support/kernel-harness.js';
+import settings from '../../src/core/settings.js';
+import core from '../../src/core/routing-policy.js';
+import Kernel from '../../src/page/playback-kernel.js';
 const A = settings.candidatePool[0], B = settings.candidatePool[1];
 const media = (host = A) => `https://${host}/upgcxcode/1/video.m4s?sign=PRIVATE`;
 const peer = media('upos-sz-302ppio.bilivideo.com');
 const payload = (base = peer) => ({ data: { dash: { video: [{ id: 120, baseUrl: base, backupUrl: [] }] } } });
-const loadKernel = require('../support/kernel-harness.cjs');
 const harness = (options = {}) => loadKernel({ ...options, kernel: Kernel, now: options.clock ?? 100000 });
 
 test('all playback globals preserve native backups while preparing shared media', () => {

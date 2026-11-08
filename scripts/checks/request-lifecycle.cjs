@@ -4,7 +4,8 @@
 const fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto');
 const { chromium } = require('playwright');
 const { createEvidenceOutput, assertBuildMatches } = require('../lib/evidence.cjs');
-const root = path.resolve(__dirname, '../..'), work = require('../lib/local.cjs').tmp;
+const root = path.resolve(__dirname, '../..'), { tmp: work, tools } = require('../lib/local.cjs');
+const { execFileSync } = require('node:child_process');
 const expectedVersion = require(path.join(root, 'package.json')).version;
 const reportName = `request-lifecycle-checks-${expectedVersion}.json`;
 const evidence = createEvidenceOutput({ root, suite: 'request-lifecycle' });
@@ -19,7 +20,7 @@ function html(metadata, qualityMetadata) {
   const early = { data: { dash: { video: [{ id: 80, baseUrl: `https://${peer}/upgcxcode/lifecycle/early/video.m4s`, backupUrl: [],
     width: 640, height: 360, frame_rate: '30', bandwidth: 1000000 }], audio: [{ id: 30280, baseUrl: `https://${A}/upgcxcode/lifecycle/early/audio.m4s`, backupUrl: [], bandwidth: 96000 }] } } };
   return `<!doctype html><html><head><meta charset="utf-8"><title>Native lifecycle fixture</title>
-<script>window.__playinfo__=${JSON.stringify(early)};window.earlyObservation={base:window.__playinfo__.data.dash.video[0].baseUrl,sessionInstalled:!!window.BiliSmoothSession,at:performance.now()};</script>
+<script>window.__playinfo__=${JSON.stringify(early)};window.earlyObservation={base:window.__playinfo__.data.dash.video[0].baseUrl,sessionInstalled:!!window.BiliSmoothRuntime,at:performance.now()};</script>
 </head><body><div class="bpx-player-container"><video muted playsinline style="width:640px;height:360px"></video></div>
 <script>(()=>{
 const metadata=${JSON.stringify(metadata)},qualityMetadata=${JSON.stringify(qualityMetadata)},state={requests:[],events:[],loads:[],frames:0,videoSerial:0,errors:[],inputFrames:0,bridgeMessages:0};
@@ -68,7 +69,7 @@ async function live(){video.pause();vb=null;ab=null;video.removeAttribute('src')
  const oscillator=audioContext.createOscillator(),gain=audioContext.createGain(),destination=audioContext.createMediaStreamDestination();gain.gain.value=0;
  oscillator.connect(gain);gain.connect(destination);oscillator.start();video.srcObject=new MediaStream([canvasTrack,...destination.stream.getAudioTracks()]);
  await audioContext.resume();generate(true);await video.play();}
-function snapshot(){const s=BiliSmoothSession.getState();return {at:performance.now(),url:location.href,source:video.currentSrc,serial:state.videoSerial,time:video.currentTime,
+function snapshot(){const s=BiliSmoothRuntime.getState();return {at:performance.now(),url:location.href,source:video.currentSrc,serial:state.videoSerial,time:video.currentTime,
 readyState:video.readyState,width:video.videoWidth,height:video.videoHeight,paused:video.paused,rate:video.playbackRate,hidden:document.hidden,frames:state.frames,inputFrames:state.inputFrames,lastFrame:state.lastFrame,
 audioTime:audioContext?.currentTime??null,buffered:ranges(video.buffered),videoBuffered:vb?ranges(vb.buffered):[],audioBuffered:ab?ranges(ab.buffered):[],error:video.error?.code??null,
 session:{version:s.version,kernelVersion:s.kernelVersion,startupReady:s.startupReady,status:s.status,frameHealth:s.media.frameHealth,mediaGeneration:s.mediaGeneration,networkEpoch:s.networkEpoch,
@@ -81,7 +82,7 @@ window.lifecycle={state,play,seek,live,generate,snapshot,rate:value=>{video.play
 }
 
 async function qualityFixture(context) {
-  const directory = path.join(output, 'native-lifecycle-fixture'); await fs.mkdir(directory, { recursive: true });
+  const directory = path.join(tools, 'native-lifecycle-fixture'); await fs.mkdir(directory, { recursive: true });
   try {
     const metadata = JSON.parse(await fs.readFile(path.join(directory, 'metadata.json'), 'utf8')), bytes = await fs.readFile(path.join(directory, 'quality-320.webm'));
     if (metadata.sha256 === hash(bytes)) return { metadata, bytes };
@@ -106,7 +107,7 @@ async function qualityFixture(context) {
   await fs.mkdir(work, { recursive: true });
   const profile = await fs.mkdtemp(path.join(work, 'request-lifecycle-')), extension = path.join(profile, 'fixture-extension');
   let context, fatal, sourceSha256, browserVersion, hiddenVerified = false, advancingClockFreeze = false;
-  let holdProbes = false, delayMedia = false, quality;
+  let delayMedia = false, quality;
   try {
     await fs.cp(path.join(root, 'dist/extension'), extension, { recursive: true });
     await assertBuildMatches(root, extension);
@@ -116,7 +117,10 @@ async function qualityFixture(context) {
     const publicKey = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).publicKey.export({ type: 'spki', format: 'der' });
     const extensionId = hash(publicKey).slice(0, 32).replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)));
     await fs.writeFile(path.join(extension, 'manifest.json'), JSON.stringify({ ...manifest, key: publicKey.toString('base64') }));
-    const mediaDirectory = path.join(output, 'av-recovery-fixture'), metadata = JSON.parse(await fs.readFile(path.join(mediaDirectory, 'metadata.json'), 'utf8'));
+    const mediaDirectory = path.join(tools, 'av-recovery-fixture');
+    try { await fs.access(path.join(mediaDirectory, 'metadata.json')); }
+    catch { execFileSync(process.execPath, [path.join(__dirname, 'media-fixture.cjs')], { timeout: 60000 }); }
+    const metadata = JSON.parse(await fs.readFile(path.join(mediaDirectory, 'metadata.json'), 'utf8'));
     const video = await fs.readFile(path.join(mediaDirectory, 'video.webm')), audio = await fs.readFile(path.join(mediaDirectory, 'audio.webm'));
     if (hash(video) !== metadata.videoSha256 || hash(audio) !== metadata.audioSha256) throw Error('Native fixture checksum mismatch');
     context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true, viewport: { width: 1200, height: 850 },
@@ -131,7 +135,6 @@ async function qualityFixture(context) {
       if (url.origin === 'https://www.bilibili.com' && url.pathname.startsWith('/video/')) return route.fulfill({ contentType: 'text/html', body: html(metadata, quality.metadata) });
       if (/\.bilivideo\.(com|cn)$/.test(url.hostname) && url.pathname.startsWith('/upgcxcode/lifecycle/')) {
         const range = request.headers().range, row = { url: url.href, range: range || null, at: Date.now(), outcome: 'pending' }; network.push(row); requestRows.set(request, row);
-        if (!range && holdProbes) { row.outcome = 'held-probe'; return; }
         if (range && delayMedia && url.pathname.includes('/network/')) { row.outcome = 'delayed-media'; await delay(1400); }
         const body = !range ? Buffer.alloc(768 * 1024, 1) : url.pathname.endsWith('/audio.m4s') ? audio : url.pathname.includes('/quality/') ? quality.bytes : video;
         const headers = { 'Content-Type': url.pathname.endsWith('/audio.m4s') ? 'audio/webm' : 'video/webm', 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'Content-Range,Content-Length', 'Timing-Allow-Origin': '*', 'Content-Length': String(body.length) };
@@ -142,8 +145,8 @@ async function qualityFixture(context) {
     });
     quality = await qualityFixture(context);
     const page = await context.newPage(); await page.goto(pageUrl);
-    await page.waitForFunction(() => window.BiliSmoothSession?.getState().startupReady, undefined, { timeout: 10000 });
-    phases.early = await page.evaluate(() => ({ ...earlyObservation, startupReady: BiliSmoothSession.getState().startupReady }));
+    await page.waitForFunction(() => window.BiliSmoothRuntime?.getState().startupReady, undefined, { timeout: 10000 });
+    phases.early = await page.evaluate(() => ({ ...earlyObservation, startupReady: BiliSmoothRuntime.getState().startupReady }));
     check('MAIN-world installation prepares head playinfo before the player exists', phases.early.sessionInstalled && new URL(phases.early.base).hostname === A && phases.early.startupReady, phases.early);
     const read = () => page.evaluate(() => lifecycle.snapshot());
     const healthy = async (label, timeout = 8000) => {
@@ -172,8 +175,8 @@ async function qualityFixture(context) {
     await page.evaluate(() => lifecycle.rate(2)); const rates = await series('rate-two', 1500);
     check('2x changes native playback speed without losing presentation health', rates.at(-1).rate === 2 && rates.at(-1).time - rates[0].time > 2 && rates.at(-1).session.status === 'smooth', rates.at(-1));
 
-    await page.evaluate(host => BiliSmoothSession.applyRoute(host), B);
-    const chosen = await page.evaluate(() => BiliSmoothSession.getConfig());
+    await page.evaluate(host => BiliSmoothRuntime.applyRoute(host), B);
+    const chosen = await page.evaluate(() => BiliSmoothRuntime.getConfig());
     const dashboard = await context.newPage(); await dashboard.goto(`chrome-extension://${extensionId}/control/index.html`); await page.bringToFront();
     const tabId = await dashboard.evaluate(async () => (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id);
     await dashboard.goto(`chrome-extension://${extensionId}/control/index.html?tab=${tabId}`); await dashboard.bringToFront(); await delay(800);
@@ -181,28 +184,27 @@ async function qualityFixture(context) {
     await dashboard.waitForFunction(() => window.BiliSmoothLive?.command, undefined, { timeout: 10000 });
     const remote = await dashboard.evaluate(() => BiliSmoothLive.command('state'));
     phases.dashboard = { hidden: hiddenVerified, state: remote?.state || remote, chosen };
-    const held = await page.evaluate(() => ({ config: BiliSmoothSession.getConfig(), route: BiliSmoothSession.rewriteUrl('https://upos-sz-302ppio.bilivideo.com/upgcxcode/lifecycle/current/video.m4s') }));
+    const held = await page.evaluate(() => ({ config: BiliSmoothRuntime.getConfig(), route: BiliSmoothRuntime.rewriteUrl('https://upos-sz-302ppio.bilivideo.com/upgcxcode/lifecycle/current/video.m4s') }));
     check('the real full dashboard connects without revoking the chosen route', held.config.pcdnHost === B && held.config.selection === 'fixed' && new URL(held.route).hostname === B, held);
     if (!hiddenVerified) limits.push('Headless Chromium did not mark the source tab hidden after opening the real dashboard; native background visibility is unverified, with no visibility override used.');
     await page.bringToFront(); const foreground = await healthy('after-dashboard');
     check('returning from the full dashboard preserves routing and healthy real frames', foreground.session.config.pcdnHost === B && foreground.session.status === 'smooth', foreground);
     await dashboard.close();
 
-    await page.evaluate(() => BiliSmoothSession.setConfig({ selection: 'auto', mode: 'bad-only' }));
-    const expectedProbes = await page.evaluate(() => Math.min(BiliSmoothSettings.candidatePool.length, BiliSmoothPlaybackKernel.constants.PROBE_MAX_HOSTS));
-    holdProbes = true; const beforeProbe = network.length; await page.evaluate(() => BiliSmoothSession.resetNetwork());
-    for (let i = 0; i < 50 && network.slice(beforeProbe).filter(row => row.outcome === 'held-probe').length < expectedProbes; i++) await delay(50);
-    const oldProbes = network.slice(beforeProbe).filter(row => row.outcome === 'held-probe');
+    await page.evaluate(() => BiliSmoothRuntime.setConfig({ selection: 'auto', mode: 'bad-only' }));
+    // "Reset network records" starts no probe: a non-Range media request after the reset would be one.
+    const beforeReset = network.length; await page.evaluate(() => BiliSmoothRuntime.resetNetwork()); await delay(600);
+    const probes = network.slice(beforeReset).filter(row => !row.range);
     delayMedia = true; await page.evaluate(() => { lifecycle.pending = lifecycle.play('network', { transport: 'fetch' }); });
     for (let i = 0; i < 50 && !network.some(row => row.url.includes('/network/') && row.range && row.outcome === 'delayed-media'); i++) await delay(20);
-    await page.evaluate(() => BiliSmoothSession.resetNetwork()); await page.evaluate(() => lifecycle.pending); delayMedia = false;
-    const reset = await healthy('network-reset'); phases.oldProbes = oldProbes;
+    await page.evaluate(() => BiliSmoothRuntime.resetNetwork()); await page.evaluate(() => lifecycle.pending); delayMedia = false;
+    const reset = await healthy('network-reset'); phases.probesAfterReset = probes;
     const mediaRequests = await page.evaluate(() => lifecycle.state.requests.filter(row => row.url.includes('/network/')));
-    check('network reset cancels only old native probe requests while media still completes', oldProbes.length === expectedProbes && oldProbes.every(row => row.failed) && mediaRequests.length === 2 && mediaRequests.every(row => row.outcome === 'complete'), { expectedProbes, oldProbes, mediaRequests });
+    check('network reset starts no probe while native media still completes', probes.length === 0 && mediaRequests.length === 2 && mediaRequests.every(row => row.outcome === 'complete'), { probes, mediaRequests });
     check('native media still appends and presents after network reassessment', reset.session.status === 'smooth' && reset.buffered.length > 0, reset);
-    holdProbes = false; await page.evaluate(() => BiliSmoothSession.resetNetwork());
+    await page.evaluate(() => BiliSmoothRuntime.resetNetwork());
 
-    await page.evaluate(() => { BiliSmoothSession.setConfig({ selection: 'fixed' }); return lifecycle.live(); });
+    await page.evaluate(() => { BiliSmoothRuntime.setConfig({ selection: 'fixed' }); return lifecycle.live(); });
     const live = await healthy('canvas-live'); const baseline = await series('canvas-baseline', 1300);
     check('native canvas plus silent audio creates real compositor frames', baseline.at(-1).frames > live.frames + 15 && baseline.at(-1).session.status === 'smooth', baseline.at(-1));
     await page.evaluate(() => { lifecycle.rate(2); lifecycle.generate(false); }); const frozen = await series('canvas-frozen', 5000);
@@ -234,7 +236,7 @@ async function qualityFixture(context) {
       sourceSha256, browserVersion, nativeHiddenVerified: hiddenVerified, advancingClockFreeze, checks, phases, network, errors, unexpected, fatal,
       limits: [...limits, 'This is a controlled native player in an isolated MV3 profile, not the production Bilibili player, DRM, 4K decoding, physical screen scanout or internet/CDN performance.',
         'Part, continuous-play and quality tests replace real MSE sources. Quality decodes separate generated 640x360 and 320x180 VP8 streams; history changes alone never count as a media replacement.',
-        'Held probe and delayed media routes use native browser request cancellation and responses. No synthetic video/visibility properties are installed.'] };
+        'Delayed media routes use native browser request cancellation and responses. No synthetic video/visibility properties are installed.'] };
     await fs.writeFile(reportPath, JSON.stringify(report, null, 2) + '\n');
     console.log(JSON.stringify({ reportPath, passed: report.passed, allIntendedScenariosVerified: report.allIntendedScenariosVerified, checks: checks.length,
       failed: checks.filter(item => !item.passed).map(item => item.name), nativeHiddenVerified: hiddenVerified, advancingClockFreeze, fatal }));

@@ -1,13 +1,11 @@
-'use strict';
-
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const os = require('node:os');
-const { createHash } = require('node:crypto');
-const { createEvidenceOutput, assertBuildMatches, playbackStalls, redactReportUrls } = require('../../scripts/lib/evidence.cjs');
-
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { createHash } from 'node:crypto';
+import evidence from '../../scripts/lib/evidence.cjs';
+const { createEvidenceOutput, assertBuildMatches, playbackStalls, redactReportUrls } = evidence;
 function workspace(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bilismooth-validation-'));
   t.after(() => {

@@ -29,12 +29,12 @@ const check=(name,passed,detail)=>{checks.push({name,passed:!!passed,...(detail=
   // Import structurally recognizable preferences without depending on a product-specific key.
   await worker.evaluate(()=>chrome.storage.local.set({'prior.preferences':{schemaVersion:4,enabled:false,selection:'fixed',pcdnHost:'upos-sz-mirrorcos.bilivideo.com',theme:'dark',lang:'en',accent:'teal'},bilismoothTheme:'dark'}));
   const source=await context.newPage();await source.goto('https://www.bilibili.com/video/BVcontrolA');
-  await source.waitForFunction(()=>window.BiliSmoothSession?.getState().startupReady&&window.BiliSmoothFloating);
+  await source.waitForFunction(()=>window.BiliSmoothRuntime?.getState().startupReady&&window.BiliSmoothFloating);
   const second=await context.newPage();await second.goto('https://www.bilibili.com/video/BVcontrolB');
-  await second.waitForFunction(()=>window.BiliSmoothSession?.getState().startupReady&&window.BiliSmoothFloating);
+  await second.waitForFunction(()=>window.BiliSmoothRuntime?.getState().startupReady&&window.BiliSmoothFloating);
   const sourceId=await worker.evaluate(async()=> (await chrome.tabs.query({url:'https://www.bilibili.com/video/BVcontrolA'}))[0].id);
   const secondId=await worker.evaluate(async()=> (await chrome.tabs.query({url:'https://www.bilibili.com/video/BVcontrolB'}))[0].id);
-  const initial=await source.evaluate(()=>BiliSmoothSession.getState());
+  const initial=await source.evaluate(()=>BiliSmoothRuntime.getState());
   check('Real content bridge retains migrated preferences before declaring startup ready',initial.version===version&&!initial.config.enabled&&initial.config.selection==='fixed'&&initial.config.theme==='dark'&&initial.config.accent==='teal');
   check('Exactly one initially collapsed in-page control exists',await source.locator('#bilismooth-floating').count()===1&&await source.locator('#bilismooth-floating').getAttribute('data-expanded')==='false');
   await source.bringToFront();
@@ -44,8 +44,8 @@ const check=(name,passed,detail)=>{checks.push({name,passed:!!passed,...(detail=
   await source.locator('#bilismooth-floating #bs-move').click();
   await source.locator('#bilismooth-floating #bs-route').waitFor();
   await source.locator('#bilismooth-floating .bs-enable .bs-switch').click();
-  await source.waitForFunction(()=>BiliSmoothSession.getConfig().enabled&&BiliSmoothSession.getState().settingsSave.status==='saved');
-  await second.waitForFunction(()=>BiliSmoothSession.getConfig().enabled);
+  await source.waitForFunction(()=>BiliSmoothRuntime.getConfig().enabled&&BiliSmoothRuntime.getState().settingsSave.status==='saved');
+  await second.waitForFunction(()=>BiliSmoothRuntime.getConfig().enabled);
   const active=await worker.evaluate(async()=> (await chrome.tabs.query({active:true,currentWindow:true}))[0]?.id);
   check('In-page setting saves through the real worker, reaches another video, and keeps its source active',active===sourceId&&context.pages().filter(page=>page.url().includes('/control/index.html')).length===0);
   const created=context.waitForEvent('page');await source.locator('#bilismooth-floating [data-action="dashboard"]').click();
@@ -69,7 +69,7 @@ const check=(name,passed,detail)=>{checks.push({name,passed:!!passed,...(detail=
   await worker.evaluate(async sourceId=>openControl({id:sourceId,url:'https://www.bilibili.com/video/BVcontrolA'}),sourceId);
   check('Toolbar action still locates and reuses the dashboard after skip-link navigation',context.pages().filter(page=>page.url().split(/[?#]/)[0]===`chrome-extension://${id}/control/index.html`).length===1);
   await set('theme','light');await set('accent','bili');
-  await second.waitForFunction(()=>BiliSmoothSession.getConfig().theme==='light'&&BiliSmoothSession.getConfig().accent==='bili');
+  await second.waitForFunction(()=>BiliSmoothRuntime.getConfig().theme==='light'&&BiliSmoothRuntime.getConfig().accent==='bili');
   await source.bringToFront();await source.waitForFunction(()=>document.querySelector('#bilismooth-floating').dataset.theme==='light'&&document.querySelector('#bilismooth-floating').dataset.accent==='bili');
   check('Dashboard appearance reaches both the runtime and in-page surface',await source.locator('#bilismooth-floating').getAttribute('data-accent')==='bili');
   await source.screenshot({path:path.join(screens,'installed-floating-light.png')});
@@ -82,7 +82,7 @@ const check=(name,passed,detail)=>{checks.push({name,passed:!!passed,...(detail=
   await control.bringToFront();await show('routes');
   await control.locator('#fixed-host').fill('upos-sz-mirrorhw.bilivideo.com');await control.locator('#apply-host').click();
   await control.waitForFunction(()=>BiliSmoothView.getSnapshot().targetHost==='upos-sz-mirrorhw.bilivideo.com'&&!document.querySelector('#apply-host').disabled);
-  const applied=await source.evaluate(()=>BiliSmoothSession.getState());
+  const applied=await source.evaluate(()=>BiliSmoothRuntime.getState());
   check('Manual route reaches runtime and waits for saved acknowledgement',applied.config.selection==='fixed'&&applied.targetHost==='upos-sz-mirrorhw.bilivideo.com'&&applied.settingsSave.status==='saved');
   check('Fixed routing disables automatic alternate-route action',await control.locator('[data-command="retry"]').first().isDisabled());
   await source.bringToFront();await source.waitForFunction(()=>document.querySelector('#bilismooth-floating').shadowRoot.querySelector('#bs-route').value==='host:upos-sz-mirrorhw.bilivideo.com');
@@ -101,8 +101,8 @@ const check=(name,passed,detail)=>{checks.push({name,passed:!!passed,...(detail=
   await control.waitForFunction(()=>!document.querySelector('#export').disabled);
   const boot=await second.evaluate(()=>fixtureBoot),response=await control.evaluate(()=>BiliSmoothLive.command('reload'));
   check('Reload replies after settings persistence',response.settingsSave.status==='saved');
-  await second.waitForFunction(previous=>window.fixtureBoot!==previous&&window.BiliSmoothSession?.getState().startupReady&&window.BiliSmoothFloating,boot);
-  check('Reloaded video retains preferences and mounts one surface',await second.evaluate(()=>BiliSmoothSession.getConfig().pcdnHost==='upos-sz-mirrorhw.bilivideo.com'&&BiliSmoothSession.getConfig().theme==='light'&&document.querySelectorAll('#bilismooth-floating').length===1));
+  await second.waitForFunction(previous=>window.fixtureBoot!==previous&&window.BiliSmoothRuntime?.getState().startupReady&&window.BiliSmoothFloating,boot);
+  check('Reloaded video retains preferences and mounts one surface',await second.evaluate(()=>BiliSmoothRuntime.getConfig().pcdnHost==='upos-sz-mirrorhw.bilivideo.com'&&BiliSmoothRuntime.getConfig().theme==='light'&&document.querySelectorAll('#bilismooth-floating').length===1));
   await control.bringToFront();await control.evaluate(()=>BiliSmoothLive.refresh(true));
   await set('accent','bili');await set('lang','zh');await show('overview');
   await control.screenshot({path:path.join(screens,'installed-light.png'),fullPage:true});

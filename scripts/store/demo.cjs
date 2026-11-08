@@ -184,7 +184,7 @@ before uploading an attachment or replacing the README demonstration.`);
     for (const old of context.pages()) if (old !== page) await old.close();
     await page.goto(demoURL, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => document.querySelector('#bilismooth-floating')?.shadowRoot &&
-      window.BiliSmoothSession?.getState().startupReady && document.querySelector('video').currentTime > 1);
+      window.BiliSmoothRuntime?.getState().startupReady && document.querySelector('video').currentTime > 1);
     await page.addStyleTag({ content: '* { cursor: none !important; }' });
     await page.mouse.move(650, 580);
     await page.evaluate(async () => {

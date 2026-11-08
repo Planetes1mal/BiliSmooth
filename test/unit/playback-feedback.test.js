@@ -1,6 +1,6 @@
-const test = require('node:test'), assert = require('node:assert/strict');
-const feedback = require('../../src/core/playback-feedback.js');
-
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import feedback from '../../src/core/playback-feedback.js';
 test('regional history ranks only challengers with decay, failure tiers and independent exploration', () => {
   const A='upos-sz-mirroraliov.bilivideo.com', H='upos-tf-all-hw.bilivideo.com', C='upos-sz-mirrorcos.bilivideo.com', K='upos-hz-mirrorakam.akamaized.net';
   const race = (host, mbps) => ({ host, ok: true, bytes: mbps * 125000, elapsedMs: 1000 });

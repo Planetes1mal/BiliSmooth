@@ -1,6 +1,8 @@
 // Real kernel, passive session and frame monitor with simulated media and network time.
-const test = require('node:test'), assert = require('node:assert/strict');
-const loadKernel = require('../support/kernel-harness.cjs'), sharedEmitter = require('../support/emitter.cjs');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import loadKernel from '../support/kernel-harness.js';
+import sharedEmitter from '../support/emitter.cjs';
 const A = 'upos-sz-mirroraliov.bilivideo.com', B = 'upos-sz-mirrorcosov.bilivideo.com';
 const media = (host = A, cid = '42231991605') => `https://${host}/upgcxcode/1/${cid}-1-30080.m4s`;
 const payload = (cid = '42231991605', fps = '60') => ({ data: { dash: { video: [{ id: 120, bandwidth: 9000000,

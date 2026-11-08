@@ -460,7 +460,7 @@ async function runOne(spec, opts, auth, extensions, ledger, persist) {
         await delay(250);
       }
       if (!ledger.stop) {
-        phase.candidateDiagnostics = await page.evaluate(() => window.BiliSmoothSession?.getDiagnostics() || null);
+        phase.candidateDiagnostics = await page.evaluate(() => window.BiliSmoothRuntime?.getDiagnostics() || null);
         if (spec.arm === 'upstream') phase.upstreamDiagnostics = await page.evaluate(() => window.BiliAccelerator.getDiagnostics());
         if (['p0', 'bilismooth'].includes(spec.arm)) {
           phase.defaultSettingsVerified = phase.samples.every(sample => sample.scheduler?.candidate && matchesDefaultRuntime(sample.scheduler.config, run.extension.defaults));

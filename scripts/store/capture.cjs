@@ -69,12 +69,12 @@ This command does not upload or publish anything.`);
     const response = await page.goto(demoURL, { waitUntil: 'domcontentloaded', timeout: 45000 });
     console.log(JSON.stringify({ stage: 'navigation', status: response.status(), title: await page.title() }));
     await page.waitForFunction(() => document.querySelector('video') && document.querySelector('#bilismooth-floating')?.shadowRoot &&
-      window.BiliSmoothSession?.getState().startupReady && document.querySelector('video').currentTime > 1,
+      window.BiliSmoothRuntime?.getState().startupReady && document.querySelector('video').currentTime > 1,
       {}, { timeout: 30000 });
     await page.waitForTimeout(2500);
     await page.screenshot({ path: path.join(out, 'initial.png') });
     console.log(JSON.stringify({ stage: 'playback', state: await page.evaluate(() => {
-      const s = BiliSmoothSession.getState(), v = document.querySelector('video');
+      const s = BiliSmoothRuntime.getState(), v = document.querySelector('video');
       return { version: s.version, title: s.videoMeta?.title,
         media: { width: v.videoWidth, height: v.videoHeight, paused: v.paused, time: v.currentTime },
         floating: document.querySelector('#bilismooth-floating').dataset.phase, lang: s.config.lang };

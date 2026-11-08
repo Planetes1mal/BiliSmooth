@@ -18,7 +18,10 @@ const outputDirectory = createEvidenceOutput({ root, suite: 'xhr-order' });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   let browser;
-  const source = await fs.readFile(path.join(root, 'src/page/request-interceptor.js'), 'utf8');
+  // The interceptor is an ES module; bundle it as a classic script that publishes BiliSmoothRequestInterceptor.
+  const bundled = await require('esbuild').build({ absWorkingDir: root, entryPoints: ['src/page/request-interceptor.js'], bundle: true, format: 'iife',
+    globalName: 'BiliSmoothRequestInterceptor', platform: 'browser', target: ['chrome120'], write: false });
+  const source = bundled.outputFiles[0].text;
   const report = { label, generatedAt: new Date().toISOString(), sourceSha256: crypto.createHash('sha256').update(source).digest('hex'), checks: [] };
   try {
     browser = await chromium.launch({ channel: 'chromium', headless: true }); report.browserVersion = browser.version();

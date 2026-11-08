@@ -1,8 +1,8 @@
 // Pointer/viewport regressions exercise production presentation over local telemetry.
-const { test, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const { chromium } = require('playwright');
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { chromium } from 'playwright';
 let browser;
 before(async () => { browser = await chromium.launch({ headless: true }); });
 after(async () => { await browser?.close(); });
@@ -15,8 +15,8 @@ async function fixture(t, options = {}) {
   t.after(() => assert.deepEqual(errors, []));
   await context.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><style>html,body{margin:0;height:100%;background:#f5f7f6}</style><video></video>' }));
   await page.goto('https://www.bilibili.com/video/BV1motion');
-  for (const file of ['src/core/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js']) {
-    await page.addScriptTag({ path: path.resolve(__dirname, '../..', file) });
+  for (const file of ['dist/extension/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js']) {
+    await page.addScriptTag({ path: path.resolve(import.meta.dirname, '../..', file) });
   }
   await page.evaluate(({ config, position }) => {
     localStorage.setItem('bilismooth.panel.position.v3', JSON.stringify(position || { x: 500, y: 400, xSide: 'left', ySide: 'top' }));
@@ -25,7 +25,7 @@ async function fixture(t, options = {}) {
     window.fixtureState = state;
     window.BiliSmoothRuntime = { getConfig: () => structuredClone(state.config), getViewState: () => structuredClone(state), getState: () => structuredClone(state), subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); } };
   }, { config: options.config || {}, position: options.position });
-  await page.addScriptTag({ path: path.resolve(__dirname, '../../src/page/floating-control.js') });
+  await page.addScriptTag({ path: path.resolve(import.meta.dirname, '../../src/page/floating-control.js') });
   const host = page.locator('#bilismooth-floating');
   await host.waitFor({ state: 'visible' });
   await page.waitForTimeout(100);

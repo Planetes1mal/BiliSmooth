@@ -75,9 +75,9 @@
     clearTimeout(request.timer); pending.delete(event.data.id);
     request.reply(event.data.ok ? { ok: true, result: event.data.result } : { ok: false, error: event.data.error || 'command-failed' });
   });
-  const commands = new Set(['state', 'config', 'reset', 'retry', 'applyRoute', 'clearData', 'clearEvents', 'diagnostics', 'reload', 'resetFloatingPosition']);
+  // The page bridge owns the command whitelist; this script only relays the extension's own messages.
   api.runtime.onMessage.addListener((message, sender, reply) => {
-    if (sender.id !== api.runtime.id || message?.channel !== 'bilismooth' || !commands.has(message.action)) return;
+    if (sender.id !== api.runtime.id || message?.channel !== 'bilismooth' || typeof message.action !== 'string') return;
     if (pending.size >= 8) { reply({ ok: false, error: 'busy' }); return; }
     const id = crypto.randomUUID(), timer = setTimeout(() => { pending.delete(id); reply({ ok: false, error: 'no-response' }); }, 6500);
     pending.set(id, { reply, timer });

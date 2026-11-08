@@ -1,10 +1,9 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs/promises');
-const os = require('node:os');
-const path = require('node:path');
-const { createHash } = require('node:crypto');
-
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 test('release gate reads synchronized versions and exact nonempty dated sections', async () => {
   const { checkRelease } = await import('../../scripts/release.mjs');
   const { extractReleaseNotes } = await import('../../scripts/lib/changelog.mjs');

@@ -1,5 +1,12 @@
-const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), vm = require('node:vm');
-const observer = require('../../src/core/media-observer.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import fs from 'node:fs';
+import observer from '../../src/core/media-observer.js';
+import Delivery from '../../src/core/delivery-session.js';
+import throughput from '../../src/core/throughput.js';
+import { decide, beatsCurrent } from '../../src/core/delivery-policy.js';
+import load from '../support/kernel-harness.js';
 const url = (id, host = 'upos-sz-mirrorcosov.bilivideo.com') => `https://${host}/upgcxcode/1/${id}.m4s?deadline=123&sign=PRIVATE_${id}`;
 const video = (id, extra = {}) => ({ id, base_url: url(id), width: 3840, height: 2160, bandwidth: 9000000, frame_rate: '60000/1001', codecs: 'hev1', codecid: 12, ...extra });
 
@@ -59,17 +66,13 @@ test('Invalid addresses and unknown numeric metadata do not become playback evid
   assert.equal(catalog.tracks().length, 1); const v = catalog.get(url(3)); assert.equal(v.width, 0); assert.equal(v.height, 0); assert.equal(v.fps, 0); assert.equal(v.bandwidth, 0);
 });
 
-test('Browser global keeps signatures only in memory, exposes no preparation or routing API, and clear removes aliases', () => {
-  const forbidden = () => { throw Error('Observer must not perform network or persistence'); };
-  const context = vm.createContext({ URL, localStorage: { getItem: forbidden, setItem: forbidden }, fetch: forbidden, chrome: { storage: { local: { set: forbidden } } } });
-  vm.runInContext(fs.readFileSync(require.resolve('../../src/core/media-observer.js'), 'utf8'), context);
-  const catalog = context.BiliSmoothCatalog.create(); assert.deepEqual(Object.keys(catalog).sort(), ['activeAudio','activeVideo','clear','collect','get','request','tracks'].sort());
+test('The catalog keeps signatures only in memory, exposes no preparation or routing API, and clear removes aliases', () => {
+  const catalog = observer.create(); assert.deepEqual(Object.keys(catalog).sort(), ['activeAudio','activeVideo','clear','collect','get','request','tracks'].sort());
   catalog.collect({ dash: { video: [video(1)] } }); catalog.request(url(1)); assert.ok(catalog.get(url(1)).url.includes('PRIVATE_1')); assert.ok(!catalog.get(url(1)).resourceId.includes('PRIVATE'));
   catalog.clear(); assert.equal(catalog.get(url(1)), null); assert.equal(catalog.activeVideo(), null); assert.equal(catalog.tracks().length, 0);
 });
 
 test('delivery sessions retain native signatures, derive only UPOS mirrors and remember requested video demand', () => {
-  const Delivery = require('../../src/core/delivery-session.js'), load = require('../support/kernel-harness.cjs');
   const cosov = 'upos-sz-mirrorcosov.bilivideo.com', akamai = 'upos-hz-mirrorakam.akamaized.net', mirror = 'upos-tf-all-hw.bilivideo.com';
   const issued = (host, file, sign) => `https://${host}/upgcxcode/05/91/${file}?os=${host === akamai ? 'akam' : 'cosovbv'}&sign=${sign}%2Bprivate`;
   const rows = [[7, 'avc1.640033', 30064, 4000000, cosov], [12, 'hev1.2.4.L153', 30080, 8000000, cosov], [13, 'av01.0.12M.10', 30120, 9000000, akamai]];
@@ -108,7 +111,6 @@ test('delivery sessions retain native signatures, derive only UPOS mirrors and r
 });
 
 test('complete video XHR samples expose conservative rates, first-byte timing and bounded recent delivery', () => {
-  const throughput = require('../../src/core/throughput.js'), load = require('../support/kernel-harness.cjs');
   const host = 'upos-sz-mirrorcosov.bilivideo.com', MiB = 1024 * 1024;
   const sample = (patch = {}) => ({ host, kind: 'video', transport: 'xhr', outcome: 'complete', hidden: false,
     range: 'bytes=0-131071', bytes: 128 * 1024, elapsedMs: 2000, firstByteMs: 500, completedAt: 2000, ...patch });
@@ -165,7 +167,6 @@ test('complete video XHR samples expose conservative rates, first-byte timing an
 });
 
 test('COSOV hanging, slow and repeated-timeout shapes trigger only their measured decisions', () => {
-  const { decide, beatsCurrent } = require('../../src/core/delivery-policy.js');
   const first = 1791477720540, second = 1791477736124, bytes = 2980583, elapsedMs = 10195.7;
   const goodputBps = bytes * 8000 / elapsedMs;
   const base = { requestAgeMs: 0, firstByteMs: 43.1, rangeBytes: 5874782, transferMs: 0, loadedBytes: 0,

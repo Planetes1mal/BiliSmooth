@@ -1,9 +1,9 @@
 // Focused real-DOM regression tests. Media and network data remain local fixtures.
-const { test, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const { chromium } = require('playwright');
-const root = path.resolve(__dirname, '../..');
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { chromium } from 'playwright';
+const root = path.resolve(import.meta.dirname, '../..');
 let browser;
 before(async () => { browser = await chromium.launch({ headless: true }); });
 after(async () => { await browser?.close(); });
@@ -15,7 +15,7 @@ async function fixture(options = {}) {
   page.setDefaultTimeout(5000);
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('https://www.bilibili.com/video/BV1u2bg6XECo');
-  for (const file of ['src/core/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js']) await page.addScriptTag({ path: path.join(root, file) });
+  for (const file of ['dist/extension/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js']) await page.addScriptTag({ path: path.join(root, file) });
   await page.evaluate(() => {
     const listeners = new Set(), config = BiliSmoothSettings.normalize();
     const state = { config, media: { present: true, playback: 'playing', frameHealth: { state: 'healthy', ageMs: 25 } }, status: 'smooth', observedAt: Date.now(), mediaGeneration: 1, bufferWallSeconds: 14.2, lastMbps: 16, lastTransferAt: Date.now(), actualHost: config.pcdnHost, delivery: {status:'native',nativeHost:config.pcdnHost,activeHost:null,nextTestAt:0,canTest:true,comparedHosts:0}, settingsSave: { status: 'saved' } };

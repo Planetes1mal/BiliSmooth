@@ -1,8 +1,8 @@
 // Real browser coverage of the public choice API and visible motion preferences.
-const { test, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const { chromium } = require('playwright');
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { chromium } from 'playwright';
 let browser;
 before(async () => { browser = await chromium.launch({ headless: true }); });
 after(async () => { await browser?.close(); });
@@ -11,7 +11,7 @@ async function fixture() {
   const page = await browser.newPage();
   await page.setContent('<button id="choose">Choose a route</button>');
   for (const file of ['src/ui/surface.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js']) {
-    await page.addScriptTag({ path: path.resolve(__dirname, '../..', file) });
+    await page.addScriptTag({ path: path.resolve(import.meta.dirname, '../..', file) });
   }
   await page.evaluate(() => {
     window.picker = BiliSmoothChoice.create({ root: document, trigger: document.querySelector('#choose'), options: [{ value: 'a', label: 'Route A' }, { value: 'b', label: 'Route B' }] });

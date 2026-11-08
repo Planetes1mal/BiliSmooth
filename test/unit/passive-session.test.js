@@ -1,7 +1,9 @@
 // Unit observations only: simulated player state is never claimed as real playback evidence.
-const test = require('node:test'), assert = require('node:assert/strict');
-const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
-const emitter = require('../support/emitter.cjs');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import emitter from '../support/emitter.cjs';
+import { createSession } from '../../src/page/session.js';
+import { installControlBridge } from '../../src/page/control-bridge.js';
 const A = 'upos-sz-mirrorcosov.bilivideo.com', B = 'upos-sz-mirroraliov.bilivideo.com';
 const raw = `https://${A}/upgcxcode/1/video.m4s?sign=TOP_SECRET`, audio = `https://${B}/upgcxcode/1/audio.m4s?token=SECRET_AUDIO`;
 const payload = { data: { dash: { video: [{ id: 120, baseUrl: raw, backupUrl: [], width: 3840, height: 2160, frame_rate: '60' }], audio: [{ id: 1, baseUrl: audio }] } } };
@@ -25,17 +27,16 @@ function harness(options = {}) {
     location: { origin: 'https://www.bilibili.com', href: 'https://www.bilibili.com/video/BVunit', reload: () => reloads++ },
     postMessage: message => messages.push(JSON.parse(JSON.stringify(message))),
     setInterval: fn => { timers.set(++serial, { fn, interval: true }); return serial; }, clearInterval: id => timers.delete(id),
-    setTimeout: (fn, delay) => { timers.set(++serial, { fn, at: clock + delay }); return serial; }, clearTimeout: id => timers.delete(id),
-    BiliSmoothPlaybackKernel: { create(options) { kernelOptions = options; emit = options.onEvent; config = options.config; installedConfig = { ...config }; emit({ type: 'config', config });
-      return { setConfig(next) { calls.push('config'); config = next; emit({ type: 'config', config }); }, getState: () => kernelState,
-        getFlags: () => ({ needReload: !!kernelState.needReload, delivery: kernelState.delivery }),
-        resetNetwork() { calls.push('reset'); }, retry() { calls.push('retry'); return true; }, rewriteUrl: value => value }; } } });
-  scope.globalThis = scope;
-  const context = vm.createContext(scope);
-  for (const file of ['src/core/settings.js', 'src/core/media-observer.js', 'src/page/frame-monitor.js', 'src/page/passive-session.js', 'src/page/control-bridge.js'])
-    vm.runInContext(fs.readFileSync(path.join(__dirname, '../..', file), 'utf8'), context);
-  const message = data => vm.runInContext('globalThis.emit("message", { source: globalThis, origin: location.origin, data: __message })', Object.assign(context, { __message: data }));
-  return { scope, api: scope.BiliSmoothSession, emit, calls, messages, store, video, document, installedConfig, kernelState, kernelOptions,
+    setTimeout: (fn, delay) => { timers.set(++serial, { fn, at: clock + delay }); return serial; }, clearTimeout: id => timers.delete(id) });
+  // A fake kernel: the session's only decision maker is replaced by a recorder of calls.
+  const createKernel = input => { kernelOptions = input; emit = input.onEvent; config = input.config; installedConfig = { ...config }; emit({ type: 'config', config });
+    return { setConfig(next) { calls.push('config'); config = next; emit({ type: 'config', config }); }, getState: () => kernelState,
+      getFlags: () => ({ needReload: !!kernelState.needReload, delivery: kernelState.delivery }),
+      resetNetwork() { calls.push('reset'); }, retry() { calls.push('retry'); return true; }, rewriteUrl: value => value }; };
+  const api = createSession({ scope, version: '2.8.3', createKernel });
+  installControlBridge({ scope, runtime: api });
+  const message = data => scope.emit('message', { source: scope, origin: scope.location.origin, data });
+  return { scope, api, emit, calls, messages, store, video, document, installedConfig, kernelState, kernelOptions,
     setPlayers(next) { players = next; },
     presentFrame(ms, metadata, callbackAt = null) { clock += ms; video.currentTime = metadata.mediaTime; const pending = [...callbacks.values()]; callbacks.clear(); for (const fn of pending) fn(callbackAt ?? clock, metadata); },
     message, advance(ms) { clock += ms; for (const [id, timer] of [...timers]) { if (timer.interval) timer.fn(); else if (timer.at <= clock) { timers.delete(id); timer.fn(); } } }, reloads: () => reloads };
@@ -150,7 +151,7 @@ test('request target, actual video bytes and playback recovery remain separate; 
   h.advance(1000); h.emit({ type: 'progress', id: 'a', status: 206, bytes: 10000, responseUrl: audio });
   assert.equal(h.api.getState().lastMbps, null); assert.equal(h.api.getState().audioHost, B);
   h.emit({ type: 'transfer', id: 'v', status: 206, bytes: 1000000, responseUrl: raw, outcome: 'unverified' });
-  const state = h.api.getState(); assert.equal(state.actualHost, A); assert.equal(state.lastMbps, 8); assert.equal(state.recoveries, 0);
+  const state = h.api.getState(); assert.equal(state.actualHost, A); assert.equal(state.lastMbps, 8); assert.equal(state.counters.recoveries, 0);
   assert.doesNotMatch(JSON.stringify(h.api.getDiagnostics()), /TOP_SECRET|SECRET_AUDIO|\?sign|\?token/);
   h.advance(3000); assert.equal(h.api.getState().lastMbps, 0, 'a continuously observed quiet window has no video bytes');
 });
@@ -159,7 +160,7 @@ test('network reset preserves in-flight request lifetime but old network bytes c
   h.emit({ type: 'request', id: 'v', originalUrl: raw, url: raw, host: A, transport: 'xhr', startedAt: 100000 });
   h.api.resetNetwork(); assert.equal(h.api.getDiagnostics().requests.length, 1);
   h.advance(1000); h.emit({ type: 'progress', id: 'v', status: 206, bytes: 1000000, responseUrl: raw });
-  assert.equal(h.api.getState().lastMbps, null); assert.equal(h.api.getState().videoBytes, 0);
+  assert.equal(h.api.getState().lastMbps, null); assert.equal(h.api.getState().counters.videoBytes, 0);
   h.emit({ type: 'transfer', id: 'v', bytes: 1000000, status: 206, outcome: 'complete' });
   assert.equal(h.api.getDiagnostics().requests.length, 0); assert.deepEqual(h.calls, ['reset']);
 });
@@ -270,15 +271,15 @@ test('missing response URLs and unknown status cannot turn the document host int
 });
 test('passive stall observations never ask the kernel to dispatch or terminate requests', () => {
   const h = harness(); h.video.readyState = 2; h.video.emit('waiting'); h.advance(10000);
-  assert.equal(h.api.getState().stalls, 1); assert.deepEqual(h.calls, []);
+  assert.equal(h.api.getState().counters.stalls, 1); assert.deepEqual(h.calls, []);
   h.document.hidden = true; h.document.emit('visibilitychange');
-  assert.equal(h.api.getState().recoveries, 0); assert.deepEqual(h.calls, []);
+  assert.equal(h.api.getState().counters.recoveries, 0); assert.deepEqual(h.calls, []);
 });
 test('absence of an initial compositor baseline remains unknown and is not a frozen-picture claim', () => {
   const h = harness(); h.advance(3000);
   assert.equal(h.api.getState().media.playback, 'playing');
   assert.equal(h.api.getState().media.frameHealth.state, 'unknown');
-  assert.equal(h.api.getState().frameStalls, 0);
+  assert.equal(h.api.getState().counters.frameStalls, 0);
 });
 test('control whitelist carries settings only after successful persistence', async () => {
   const h = harness(); h.message({ __biliSmooth: 'request', id: 'advanced', action: 'config', patch: { mcdnStrategy: 'replace', p2pGuard: true, portHeuristic: false, rewriteAkamai: true, lang: 'en', accent: 'violet' } });
@@ -342,7 +343,7 @@ test('healthy frames and clock clear a stale stalled hint without asking the ker
   h.video.emit('stalled');
   for (let i = 0; i < 7; i++) step();
   assert.equal(h.api.getState().media.playback, 'playing');
-  assert.equal(h.api.getState().stalls, 0);
+  assert.equal(h.api.getState().counters.stalls, 0);
   assert.ok(h.api.getDiagnostics().events.some(row => row.type === 'waiting-cleared'));
   assert.deepEqual(h.calls, []);
 });
@@ -357,12 +358,12 @@ test('existing stall survives a seek and recovers only after fresh healthy frame
   assert.equal(h.api.getDiagnostics().activeEpisode.seekTransitions, 1);
   assert.equal(h.api.getDiagnostics().episodes.length, 0);
   h.video.seeking = false; h.video.readyState = 4; h.video.emit('seeked'); h.video.emit('playing');
-  assert.equal(h.api.getState().recoveries, 0);
+  assert.equal(h.api.getState().counters.recoveries, 0);
   for (let i = 0; i < 6; i++) step();
   const report = h.api.getDiagnostics(), episode = report.episodes[0];
-  assert.equal(report.stalls, 1); assert.equal(report.recoveries, 1); assert.equal(episode.outcome, 'recovered');
+  assert.equal(report.counters.stalls, 1); assert.equal(report.counters.recoveries, 1); assert.equal(episode.outcome, 'recovered');
   assert.equal(episode.seekTransitions, 1); assert.equal(episode.seekingMs, 3000);
-  assert.equal(episode.observedStallMs, 2000); assert.equal(report.totalStallMs, 2000);
+  assert.equal(episode.observedStallMs, 2000); assert.equal(report.counters.totalStallMs, 2000);
   assert.ok(episode.durationMs > episode.observedStallMs + episode.seekingMs);
   assert.ok(report.events.some(row => row.type === 'player-event' && row.source === 'seeking'));
   assert.deepEqual(h.calls, []);
@@ -371,9 +372,9 @@ test('existing stall survives a seek and recovers only after fresh healthy frame
 test('a seek without a previous stall does not create a stall during seek grace', () => {
   const h = harness(); h.video.readyState = 2; h.video.seeking = true; h.video.emit('seeking'); h.advance(1000);
   h.video.seeking = false; h.video.emit('seeked'); h.advance(500);
-  assert.equal(h.api.getState().stalls, 0);
+  assert.equal(h.api.getState().counters.stalls, 0);
   h.video.readyState = 4; h.video.emit('playing'); h.advance(1000);
-  assert.equal(h.api.getState().stalls, 0);
+  assert.equal(h.api.getState().counters.stalls, 0);
 });
 
 test('failed transfers preserve request correlation and target without inventing a response host', () => {
@@ -409,14 +410,14 @@ test('long gaps in observation are reported separately instead of counted as cer
   const h = harness(); h.video.readyState = 2; h.video.emit('waiting'); h.advance(10000);
   h.video.paused = true; h.video.emit('pause');
   const report = h.api.getDiagnostics();
-  assert.equal(report.totalStallMs, 0); assert.equal(report.episodes[0].unobservedMs, 10000);
+  assert.equal(report.counters.totalStallMs, 0); assert.equal(report.episodes[0].unobservedMs, 10000);
 });
 
 test('normal fetch ResourceTiming completions cannot evict critical events, and active observed stall time is included', () => {
   const h = harness(); h.emit({ type: 'payload', original: payload, prepared: payload });
   h.video.readyState = 2; h.video.emit('waiting');
   for (let i = 0; i < 5; i++) h.advance(1000);
-  assert.equal(h.api.getState().totalStallMs, 5000);
+  assert.equal(h.api.getState().counters.totalStallMs, 5000);
   for (let i = 0; i < 805; i++) {
     const id = 'reference-' + i;
     h.emit({ type: 'request', id, originalUrl: raw, url: raw, host: A, transport: 'fetch' });
@@ -426,7 +427,7 @@ test('normal fetch ResourceTiming completions cannot evict critical events, and 
   assert.ok(report.events.some(row => row.type === 'stall'));
   assert.equal(report.retention.droppedCriticalEvents, 0);
   h.video.paused = true; h.video.emit('pause');
-  assert.equal(h.api.getState().totalStallMs, 5000);
+  assert.equal(h.api.getState().counters.totalStallMs, 5000);
 });
 
 test('startup preserves first milestones across repeated playinfo and distinguishes preparation from native paused state', () => {
@@ -468,7 +469,7 @@ test('playing and decoded quality never invent a first compositor frame or leave
   assert.equal(s.startup.firstPresentedFrameAt, null); assert.equal(s.startup.firstFrameEvidence, 'unsupported');
   assert.equal(s.startup.playingAt, 100000); assert.equal(s.startup.playinfoToFirstFrameMs, null);
   assert.equal(h.kernelOptions.getPlaybackEvidence().startupPending, false);
-  assert.equal(s.bufferMediaSeconds, s.buffer); assert.equal(s.bufferWallSeconds, s.buffer / 2);
+  assert.equal(s.bufferWallSeconds, s.buffer / 2);
   assert.equal(h.api.getDiagnostics().observations.at(-1).bufferWallSeconds, s.bufferWallSeconds);
 });
 

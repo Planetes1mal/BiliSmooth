@@ -1,11 +1,15 @@
 // Integration coverage with the production kernel and passive adapter in one
 // JavaScript world. Native networking is a dispatch fixture, not playback proof.
-const test = require('node:test'), assert = require('node:assert/strict');
-const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createSession } from '../../src/page/session.js';
+import { createKernel } from '../../src/page/playback-kernel.js';
+import settings from '../../src/core/settings.js';
+const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 const A = 'upos-sz-mirrorcosov.bilivideo.com', B = 'upos-sz-mirroraliov.bilivideo.com';
 const peer = 'https://upos-sz-302ppio.bilivideo.com/upgcxcode/1/video.m4s?sign=IN_MEMORY_ONLY';
-const root = path.resolve(__dirname, '../..');
-const emitter = require('../support/emitter.cjs');
+import emitter from '../support/emitter.cjs';
 function load() {
   const wall = 1800000000000, timers = new Map(), dispatches = [], messages = [];
   let serial = 0;
@@ -43,16 +47,10 @@ function load() {
     __playinfo__: { data: { dash: { video: [{ id: 80, baseUrl: peer, backupUrl: [] }] } } }
   });
   scope.globalThis = scope;
-  const context = vm.createContext(scope);
-  const evaluate = file => vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
-  for (const file of ['src/core/settings.js', 'src/core/routing-policy.js', 'src/core/media-observer.js', 'src/core/delivery-session.js', 'src/core/delivery-policy.js', 'src/core/throughput.js', 'src/core/playback-feedback.js',
-    'src/page/frame-monitor.js', 'src/page/network-probe.js', 'src/page/request-interceptor.js', 'src/page/playback-kernel.js', 'src/page/passive-session.js']) evaluate(file);
-  const kernel = vm.runInContext('BiliSmoothPlaybackKernel.create({scope:globalThis})', context);
-  const message = config => {
-    context.__incomingConfig = config;
-    vm.runInContext('globalThis.emit("message", {source:globalThis, origin:location.origin, data:{__bilismoothConfig:"config",config:__incomingConfig}})', context);
-  };
-  return { scope, context, evaluate, kernel, api: scope.BiliSmoothSession, dispatches, messages, timers, store, rankKey, message };
+  const api = createSession({ scope, version: pkg.version });
+  const kernel = createKernel({ scope });
+  const message = config => scope.emit('message', { source: scope, origin: scope.location.origin, data: { __bilismoothConfig: 'config', config } });
+  return { scope, kernel, api, dispatches, messages, timers, store, rankKey, message };
 }
 
 async function assertNativeDispatch(h, host) {
@@ -73,7 +71,7 @@ test('initial automatic storage handshake ignores removed ranking and preserves 
   assert.equal(h.api.getState().startupReady, false);
   assert.equal(h.dispatches.length, 0);
   assert.equal(h.messages.filter(row => row.__bilismoothConfig === 'save').length, 0);
-  h.message(h.scope.BiliSmoothSettings.normalize({ selection: 'auto', pcdnHost: A, theme: 'dark' }));
+  h.message(settings.normalize({ selection: 'auto', pcdnHost: A, theme: 'dark' }));
   assert.equal(h.api.getState().startupReady, true);
   assert.equal(h.api.getConfig().pcdnHost, A);
   assert.equal(h.api.getConfig().theme, 'dark');
@@ -88,7 +86,7 @@ test('initial automatic storage handshake ignores removed ranking and preserves 
 test('initial fixed storage preference controls dispatch without restoring old automatic selection', async () => {
   const h = load();
   assert.equal(h.api.getConfig().pcdnHost, A);
-  h.message(h.scope.BiliSmoothSettings.normalize({ selection: 'fixed', pcdnHost: A }));
+  h.message(settings.normalize({ selection: 'fixed', pcdnHost: A }));
   assert.equal(h.api.getConfig().selection, 'fixed');
   assert.equal(h.api.getConfig().pcdnHost, A);
   assert.equal(h.kernel.getConfig().pcdnHost, A);
@@ -103,14 +101,14 @@ test('adapter reinjection and repeated create retain a single kernel and one net
   const hooks = { parse: h.scope.JSON.parse, fetch: h.scope.fetch, open: h.scope.XMLHttpRequest.prototype.open,
     send: h.scope.XMLHttpRequest.prototype.send, header: h.scope.XMLHttpRequest.prototype.setRequestHeader };
   const beforeTimers = h.timers.size, session = h.api;
-  h.evaluate('src/page/passive-session.js');
-  const again = vm.runInContext('BiliSmoothPlaybackKernel.create({scope:globalThis,config:{pcdnHost:"ignored.example"}})', h.context);
-  assert.equal(again, h.kernel); assert.equal(h.scope.BiliSmoothSession, session);
+  assert.equal(createSession({ scope: h.scope }), session);
+  const again = createKernel({ scope: h.scope, config: { pcdnHost: 'ignored.example' } });
+  assert.equal(again, h.kernel);
   assert.equal(h.timers.size, beforeTimers);
   assert.equal(h.scope.JSON.parse, hooks.parse); assert.equal(h.scope.fetch, hooks.fetch);
   assert.equal(h.scope.XMLHttpRequest.prototype.open, hooks.open); assert.equal(h.scope.XMLHttpRequest.prototype.send, hooks.send);
   assert.equal(h.scope.XMLHttpRequest.prototype.setRequestHeader, hooks.header);
-  h.message(h.scope.BiliSmoothSettings.normalize({ selection: 'auto', pcdnHost: A }));
+  h.message(settings.normalize({ selection: 'auto', pcdnHost: A }));
   await assertNativeDispatch(h, A);
   assert.equal(h.api.getState().events.filter(event => event.type === 'request').length, 2);
   h.kernel.destroy();

@@ -11,7 +11,7 @@ const root = path.resolve(__dirname, '../..');
 const value = key => process.argv.find(arg => arg.startsWith('--' + key + '='))?.split('=').slice(1).join('=');
 const label = runLabel() || 'current', frozen = value('source-dir');
 const out = createEvidenceOutput({ root, suite: 'theme-readability' });
-const sources = ['src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/control/control.css', 'src/ui/control/index.html', 'src/page/floating-control.js', 'src/core/settings.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js'];
+const sources = ['src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/control/control.css', 'src/ui/control/index.html', 'src/page/floating-control.js', 'dist/extension/settings.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js'];
 const accents = ['peach', 'bili', 'teal', 'emerald', 'violet', 'pink', 'sunset', 'graphite'];
 const types = ['status-logo', 'logo', 'status', 'speed', 'buffer', 'combined', 'route', 'rate', 'resolution'];
 const states = ['smooth', 'playing', 'buffering', 'frozen', 'paused', 'waiting'];
@@ -98,14 +98,14 @@ function helpers() {
     doc.on('pageerror', error => errors.push(error.message));
     const html = code.get('src/ui/control/index.html').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<link\b[^>]*>/gi, '').replace(/<img\b[^>]*>/gi, '');
     await doc.setContent(html);
-    for (const file of ['src/core/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js']) await doc.addScriptTag({ content: code.get(file) });
+    for (const file of ['dist/extension/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js']) await doc.addScriptTag({ content: code.get(file) });
     await doc.evaluate(() => { BiliSmoothSurfaceStyles.mount(document); BiliSmoothEntryDisplay.mount(document); document.documentElement.dataset.motion = 'on'; document.querySelectorAll('.view').forEach(node => node.hidden = node.id !== 'page-settings'); document.getElementById('page-title').textContent = '偏好设置'; const defaults = BiliSmoothSettings.normalize(); document.querySelectorAll('[data-config]').forEach(node => { if (node.type === 'checkbox') node.checked = !!defaults[node.dataset.config]; if (node.type === 'radio') node.checked = node.value === defaults[node.dataset.config]; }); window.entryInstances = [...document.querySelectorAll('[data-entry-preview]')].map(host => BiliSmoothEntryDisplay.create(host, { type: host.dataset.entryPreview, snapshot: null })); });
     await doc.addStyleTag({ content: code.get('src/ui/control/control.css') }); await doc.evaluate(helpers);
     const floating = await browser.newPage({ viewport: { width: 1366, height: 1000 } });
     floating.on('pageerror', error => errors.push(error.message));
     await floating.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Readability fixture</title><style>body{margin:0;background:#18191c;min-height:1200px}.bpx-player-container{position:absolute;left:80px;top:100px;width:850px;height:478px;background:#222}video{width:100%;height:100%}</style><div class="bpx-player-container"><div class="bpx-player"><video></video></div></div>' }));
     await floating.goto('https://www.bilibili.com/video/BVreadability');
-    for (const file of ['src/core/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js']) await floating.addScriptTag({ content: code.get(file) });
+    for (const file of ['dist/extension/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js']) await floating.addScriptTag({ content: code.get(file) });
     await floating.evaluate(helpers);
     await floating.evaluate(() => {
       const listeners = new Set(); window.themeState = { ...readabilitySnapshot('smooth'), config: BiliSmoothSettings.normalize({ theme: 'light' }), mediaGeneration: 1, settingsSave: { status: 'saved' } };

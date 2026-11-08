@@ -1,8 +1,11 @@
 // Exercise the production path builder with timestamped observations, not a demo curve.
-const test = require('node:test'), assert = require('node:assert/strict');
-const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import fs from 'node:fs';
+import path from 'node:path';
 function chart(samples, time = 100000) {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/ui/control/app.js'), 'utf8');
+  const source = fs.readFileSync(path.join(import.meta.dirname, '../../src/ui/control/app.js'), 'utf8');
   const body = source.slice(source.indexOf(' function renderSpeed('), source.indexOf(' function moveGraph('));
   const nodes = new Map();
   class Clock extends Date { static now() { return time; } }

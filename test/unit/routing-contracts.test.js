@@ -1,10 +1,10 @@
 // Product behavior contracts: expected outcomes are explicit; no archived runtime is executed.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const settings = require('../../src/core/settings.js');
-const policy = require('../../src/core/routing-policy.js');
-const probe = require('../../src/page/network-probe.js');
-const load = require('../support/kernel-harness.cjs');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import load from '../support/kernel-harness.js';
+import settings from '../../src/core/settings.js';
+import policy from '../../src/core/routing-policy.js';
+import probe from '../../src/page/network-probe.js';
 const A = 'upos-sz-mirrorcosov.bilivideo.com', B = 'upos-sz-mirroraliov.bilivideo.com';
 const C = 'upos-tf-all-tx.bilivideo.com';
 const media = host => `https://${host}/upgcxcode/21/video.m4s?token=PRIVATE`;

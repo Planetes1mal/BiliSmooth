@@ -1,8 +1,11 @@
-'use strict';
-const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
-const emitter = require('./emitter.cjs');
-const root = path.resolve(__dirname, '../..'), clone = value => JSON.parse(JSON.stringify(value));
-module.exports = function load(options = {}) {
+// Headless harness: a fake window scope with a controllable clock, timers, storage, XHR and fetch,
+// running the real kernel (and optionally the real session) through dependency injection.
+import emitter from './emitter.cjs';
+import { createKernel } from '../../src/page/playback-kernel.js';
+import { createSession } from '../../src/page/session.js';
+
+const clone = value => JSON.parse(JSON.stringify(value));
+export default function load(options = {}) {
   let time = options.now ?? 1800000000000, serial = 0, frameCount = 0, bufferEnd = 40;
   const session = !!options.session, events = [], calls = [], timers = new Map(), frames = new Map();
   const store = options.store || new Map(options.storage || []), event = session || !!options.kernel;
@@ -52,23 +55,11 @@ module.exports = function load(options = {}) {
   if (options.fetch) scope.fetch = async (input, init) => { calls.push({ input, init }); return options.fetch(input, init, { advance: ms => time += ms, scope }); };
   Object.assign(scope, options.globals || {}); scope.globalThis = scope; scope.window = scope;
   const native = { json: scope.JSON.parse, parse: scope.JSON.parse, fetch: scope.fetch, open: XHR.prototype.open, send: XHR.prototype.send };
-  const files = ['src/core/settings.js', 'src/core/routing-policy.js', 'src/core/media-observer.js', 'src/core/delivery-session.js', 'src/core/delivery-policy.js', 'src/core/throughput.js', 'src/core/playback-feedback.js',
-    ...(session ? ['src/page/frame-monitor.js'] : []),
-    'src/page/network-probe.js', 'src/page/request-interceptor.js', 'src/page/playback-kernel.js'];
   let kernel, api;
-  if (options.kernel) {
-    scope.BiliSmoothRoutingPolicy = require('../../src/core/routing-policy.js');
-    kernel = api = options.kernel.create({ scope, config: options.config || {}, onEvent: row => events.push(row) });
-  } else {
-    const context = vm.createContext(scope), evaluate = file => vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
-    files.forEach(evaluate);
-    if (session) {
-      const actualKernel = scope.BiliSmoothPlaybackKernel;
-      scope.BiliSmoothPlaybackKernel = { ...actualKernel, create(input) { kernel = actualKernel.create({ ...input, ...options.kernelOptions }); return kernel; } };
-      evaluate('src/page/passive-session.js'); api = scope.BiliSmoothSession;
-      api.setConfig(options.config); scope.__playinfo__ = options.payload;
-    } else kernel = api = scope.BiliSmoothPlaybackKernel.create({ scope, config: options.config || {}, onEvent: row => events.push(row) });
-  }
+  if (session) {
+    api = createSession({ scope, version: '2.8.3', createKernel: input => { kernel = createKernel({ ...input, ...options.kernelOptions }); return kernel; } });
+    api.setConfig(options.config); scope.__playinfo__ = options.payload;
+  } else kernel = api = createKernel({ scope, config: options.config || {}, onEvent: row => events.push(row) });
   const flush = async () => { for (let i = 0; i < (options.kernel ? 80 : 250); i++) await Promise.resolve(); };
   function* ticks(ms, { frames: presentFrames = false, move = true } = {}) {
     const target = time + ms; let guard = 0;
@@ -91,7 +82,7 @@ module.exports = function load(options = {}) {
   const advance = options.kernel ? async ms => { for (const _ of ticks(ms)) await flush(); await flush(); }
     : (ms, detail) => { for (const _ of ticks(ms, detail)) {} };
   function request(raw) { const xhr = new scope.XMLHttpRequest(); xhr.open('GET', raw); xhr.send(); return xhr; }
-  return { scope, document, video, api, kernel, native, originals: native, calls, events, store, timers, files, advance, flush, request,
+  return { scope, document, video, api, kernel, native, originals: native, calls, events, store, timers, advance, flush, request,
     state: () => clone(api.getState()), config: () => clone(api.getConfig()), now: () => time,
     replacePlayer(next = null) { currentVideo = next; }, buffer: seconds => { bufferEnd = video.currentTime + seconds; },
     stopObservations() { for (const [id, timer] of timers) if (timer.interval === 1000 && timer.fn.name === 'tick') timers.delete(id); },
@@ -101,4 +92,4 @@ module.exports = function load(options = {}) {
       if (complete) { xhr.responseHeaders['content-type'] = 'application/json'; xhr.text = text; xhr.complete(text.length, status); }
       return xhr;
     } };
-};
+}

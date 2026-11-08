@@ -1,18 +1,21 @@
-'use strict';
 
 // Focused interaction regressions against the real extension sources and build.
 // Chrome messaging and playback telemetry are deterministic local fixtures;
 // geometry, pointer input, focus, scrolling, rendering and persistence code are real.
-const { test, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { chromium } = require('playwright');
-const { createEvidenceOutput } = require('../../scripts/lib/evidence.cjs');
-const root = path.resolve(__dirname, '../..');
-const version = require('../../package.json').version;
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+import { chromium } from 'playwright';
+import { readFileSync } from 'node:fs';
+const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+import evidence from '../../scripts/lib/evidence.cjs';
+import settings from '../../src/core/settings.js';
+const { createEvidenceOutput } = evidence;
+const root = path.resolve(import.meta.dirname, '../..');
+const version = pkg.version;
 const types = ['status-logo', 'logo', 'status', 'speed', 'buffer', 'combined', 'route', 'rate', 'resolution'];
-const sourceFiles = ['src/core/settings.js', 'src/ui/surface.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js', 'src/ui/entry-display.js', 'src/page/floating-control.js'];
+const sourceFiles = ['dist/extension/settings.js', 'src/ui/surface.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js', 'src/ui/entry-display.js', 'src/page/floating-control.js'];
 const output = createEvidenceOutput({ root, suite: 'design-adoption' });
 let browser;
 before(async () => { await fs.mkdir(output, { recursive: true }); browser = await chromium.launch({ headless: true }); });
@@ -20,7 +23,7 @@ after(async () => { await browser?.close(); });
 
 function telemetry(config = {}) {
   return { version, observedAt: Date.now(), startupReady: true, hidden: false,
-    config: { ...require('../../src/core/settings.js').normalize(), theme: 'light', ...config },
+    config: { ...settings.normalize(), theme: 'light', ...config },
     settingsSave: { status: 'saved' }, status: 'smooth', mediaGeneration: 1,
     videoMeta: { title: '本地验收视频', url: 'https://www.bilibili.com/video/BV1adoption', coverUrl: null },
     media: { present: true, playback: 'playing', currentTime: 83, duration: 480, width: 1920, height: 1080, frameHealth: { state: 'healthy', ageMs: 20 } },
@@ -189,7 +192,7 @@ async function dashboard(t) {
   await context.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.origin !== 'http://bilismooth-adoption.test') { external.push(url.href); return route.abort(); }
-    const file = url.pathname === '/settings.js' ? 'src/core/settings.js' : url.pathname.startsWith('/icons/') ? 'src/extension' + url.pathname : 'src/ui' + url.pathname;
+    const file = url.pathname === '/settings.js' ? 'dist/extension/settings.js' : url.pathname.startsWith('/icons/') ? 'src/extension' + url.pathname : 'src/ui' + url.pathname;
     const ext = path.extname(file), bytes = await fs.readFile(path.join(root, file));
     const body = ext === '.html' ? bytes.toString().replace('name="bilismooth-version" content=""', 'name="bilismooth-version" content="' + version + '"') : bytes;
     await route.fulfill({ body, contentType: ext === '.html' ? 'text/html; charset=utf-8' : ext === '.css' ? 'text/css' : ext === '.svg' ? 'image/svg+xml' : ext === '.png' ? 'image/png' : 'application/javascript' });
@@ -290,7 +293,7 @@ test('installed MV3 extension propagates and reloads the new preferences through
     const extensionId = new URL(worker.url()).hostname;
     const video = await context.newPage();
     await video.goto('https://www.bilibili.com/video/BV1mv3adoption');
-    await video.waitForFunction(() => window.BiliSmoothSession?.getState().startupReady && window.BiliSmoothFloating);
+    await video.waitForFunction(() => window.BiliSmoothRuntime?.getState().startupReady && window.BiliSmoothFloating);
     const tabId = await worker.evaluate(async () => (await chrome.tabs.query({ url: 'https://www.bilibili.com/video/BV1mv3adoption' }))[0].id);
     const control = await context.newPage();
     await control.goto('chrome-extension://' + extensionId + '/control/index.html?tab=' + tabId);
@@ -298,12 +301,12 @@ test('installed MV3 extension propagates and reloads the new preferences through
     await control.locator('nav [data-page=settings]').click();
     for (const type of types) {
       await control.locator('.entry-option').filter({ has: control.locator('input[data-config=floatingEntryType][value="' + type + '"]') }).click();
-      await video.waitForFunction(type => BiliSmoothSession.getConfig().floatingEntryType === type, type);
+      await video.waitForFunction(type => BiliSmoothRuntime.getConfig().floatingEntryType === type, type);
     }
     await control.locator('#switch-floatingEntryEnabled').uncheck();
-    await video.waitForFunction(() => !BiliSmoothSession.getConfig().floatingEntryEnabled);
+    await video.waitForFunction(() => !BiliSmoothRuntime.getConfig().floatingEntryEnabled);
     await control.locator('#switch-floatingEdgeSnap').uncheck();
-    await video.waitForFunction(() => !BiliSmoothSession.getConfig().floatingEdgeSnap);
+    await video.waitForFunction(() => !BiliSmoothRuntime.getConfig().floatingEdgeSnap);
     const stored = await worker.evaluate(async () => (await chrome.storage.local.get('bilismooth.config.v4'))['bilismooth.config.v4']);
     assert.equal(stored.floatingEntryType, 'resolution');
     assert.equal(stored.floatingEntryEnabled, false); assert.equal(stored.floatingEdgeSnap, false);
@@ -320,8 +323,8 @@ test('installed MV3 extension propagates and reloads the new preferences through
     assert.ok(Math.abs(reset.left - dragged.left) > 20 || Math.abs(reset.top - dragged.top) > 20, 'Selected-tab dashboard command moves the real floating surface');
     assert.ok(Math.abs(reset.right - view.right) <= 2 && Math.abs(reset.bottom - view.bottom) <= 2, 'Reset restores the default bottom-right anchor');
     await video.bringToFront(); await video.reload();
-    await video.waitForFunction(() => BiliSmoothSession?.getState().startupReady && window.BiliSmoothFloating);
-    const config = await video.evaluate(() => BiliSmoothSession.getConfig());
+    await video.waitForFunction(() => BiliSmoothRuntime?.getState().startupReady && window.BiliSmoothFloating);
+    const config = await video.evaluate(() => BiliSmoothRuntime.getConfig());
     assert.equal(config.floatingEntryType, 'resolution');
     assert.equal(config.floatingEntryEnabled, false); assert.equal(config.floatingEdgeSnap, false);
     await video.waitForFunction(() => document.querySelector('#bilismooth-floating')?.dataset.phase === 'preview');

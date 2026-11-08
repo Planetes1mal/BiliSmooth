@@ -45,12 +45,12 @@ for(const name of ['loadedmetadata','loadeddata','seeking','seeked','waiting','p
 function frame(now,data){state.frames++;if(state.firstFrameAt===null)state.firstFrameAt=now;state.lastFrame={at:now,time:data.mediaTime};video.requestVideoFrameCallback(frame);}
 function append(bytes){return new Promise((resolve,reject)=>{const done=()=>{cleanup();resolve();},fail=()=>{cleanup();reject(Error('append failed'));},cleanup=()=>{buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);};buffer.addEventListener('updateend',done);buffer.addEventListener('error',fail);buffer.appendBuffer(bytes);});}
 function request(attempt=0){
- const record={attempt,at:performance.now(),requestedTarget:BiliSmoothSession.getState().targetHost,outcome:'pending'};state.requests.push(record);
+ const record={attempt,at:performance.now(),requestedTarget:BiliSmoothRuntime.getState().targetHost,outcome:'pending'};state.requests.push(record);
  const xhr=new XMLHttpRequest();xhr.open('GET','https://${A}${mediaPath}');xhr.responseType='arraybuffer';xhr.timeout=10000;
  xhr.setRequestHeader('Range','bytes=${clusterOffset}-${metadata.videoBytes - 1}');
  // Registered before send, just as a player owns its request timeout/retry.
  const handlers={
- timeout:()=>{record.outcome='timeout';record.finishedAt=performance.now();record.retryTarget=BiliSmoothSession.getState().targetHost;
+ timeout:()=>{record.outcome='timeout';record.finishedAt=performance.now();record.retryTarget=BiliSmoothRuntime.getState().targetHost;
   if(attempt<1)request(attempt+1);else state.errors.push('both requests timed out');},
  progress:event=>{record.bytes=event.loaded;},
  error:()=>{record.outcome='error';state.errors.push('XHR network error');},
@@ -71,7 +71,7 @@ async function start(){if(state.started)return;state.started=true;state.startedA
 }
 window.startupFixture={state,snapshot:()=>({at:performance.now(),currentTime:video.currentTime,readyState:video.readyState,paused:video.paused,seeking:video.seeking,frames:state.frames,error:video.error?.code??null,
  native:{clock:Function.prototype.toString.call(Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'currentTime').get).includes('[native code]'),ready:Function.prototype.toString.call(Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'readyState').get).includes('[native code]'),rvfc:Function.prototype.toString.call(video.requestVideoFrameCallback).includes('[native code]'),noOwn:['currentTime','readyState','requestVideoFrameCallback'].every(key=>!Object.hasOwn(video,key))},
- diagnostics:BiliSmoothSession.getDiagnostics()})};document.getElementById('start').addEventListener('click',()=>start().catch(error=>state.errors.push(String(error))));
+ diagnostics:BiliSmoothRuntime.getDiagnostics()})};document.getElementById('start').addEventListener('click',()=>start().catch(error=>state.errors.push(String(error))));
 })();</script></body></html>`;
 }
 
@@ -110,9 +110,9 @@ async function run(adaptive, directory, server, metadata, video, clusterOffset, 
           measuredAt: host === B ? Date.now() : 0, failedAt: host === B ? 0 : Date.now() })) })), B);
       await page.reload();
     }
-    await page.waitForFunction(() => window.BiliSmoothSession?.getState().startupReady === true, undefined, { timeout: 10000 });
+    await page.waitForFunction(() => window.BiliSmoothRuntime?.getState().startupReady === true, undefined, { timeout: 10000 });
     await page.evaluate(({ A, B, adaptive }) => {
-      BiliSmoothSession.setConfig({ enabled: adaptive, selection: 'auto', mode: 'bad-only', pcdnHost: A, stallRecovery: true });
+      BiliSmoothRuntime.setConfig({ enabled: adaptive, selection: 'auto', mode: 'bad-only', pcdnHost: A, stallRecovery: true });
     }, { A, B, adaptive });
     await page.click('#start');
     if (adaptive) await page.waitForFunction(() => startupFixture.state.frames >= 10 || startupFixture.state.errors.length > 0, undefined, { timeout: 18000 });

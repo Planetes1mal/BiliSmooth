@@ -17,7 +17,7 @@ function visualState() {
  const visible = node => { if (!node || node.hidden) return false; const r=rect(node),style=getComputedStyle(node); return r.width>0&&r.height>0&&style.visibility!=='hidden'&&style.display!=='none'; };
  const intersect = (a,b) => a&&b ? Math.max(0,Math.min(a.right,b.right)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.y,b.y)) : null;
  const panel = rect(host), player = rect(document.querySelector('.bpx-player-container,.bilibili-player,#bilibili-player')), nativeControls = rect(document.querySelector('.bpx-player-control-bottom'));
- const runtime = window.BiliSmoothRuntime, session = window.BiliSmoothSession;
+ const runtime = window.BiliSmoothRuntime, session = window.BiliSmoothRuntime;
  const stateRead = runtime?.getViewState ? 'getViewState' : 'getState';
  const state = runtime?.[stateRead]?.(), config = state?.config||runtime?.getConfig?.(), media = document.querySelector('video');
  const body=shadow?.getElementById('bs-body'), route=shadow?.getElementById('bs-route'), menu=shadow?.querySelector('.bs-choice-layer[data-state="open"]');

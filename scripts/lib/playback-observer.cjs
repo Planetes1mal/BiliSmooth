@@ -38,7 +38,7 @@ function snapshot() {
   const videos = [...document.querySelectorAll('video')];
   const video = videos.sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)[0];
   const frames = window.__biliFramesFor(video);
-  const session = window.BiliSmoothSession?.getState();
+  const session = window.BiliSmoothRuntime?.getState();
   const nativeQuality = window.player?.getQuality?.();
   return { at: performance.now(), visibility: document.visibilityState, videoId: frames.videoId, frames: frames.frames, lastFrameAt: frames.lastFrameAt,
     firstFrameAt: frames.firstFrameAt, scheduler: { candidate: !!session, config: session?.config, version: session?.version,

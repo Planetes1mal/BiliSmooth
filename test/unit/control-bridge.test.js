@@ -1,25 +1,22 @@
-const test = require('node:test'), assert = require('node:assert/strict');
-const fs = require('node:fs'), vm = require('node:vm');
-const settings = require('../../src/core/settings.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import settings from '../../src/core/settings.js';
+import { installControlBridge } from '../../src/page/control-bridge.js';
 function bridge() {
   const callbacks = [], responses = [], timers = [], calls = [];
   let settle, reject, persisted = Promise.resolve();
-  const session = { getState: () => ({ version: '2.3.0' }), getDiagnostics: () => ({ events: ['retained'] }),
+  const runtime = { getState: () => ({ version: '2.3.0' }), getDiagnostics: () => ({ events: ['retained'] }),
     setConfig: patch => calls.push(patch), flushSettings: () => persisted,
     reload: () => true, applyRoute: host => settings.isCdnHost(host),
     resetNetwork() {}, clearEvents() {}, clearData() {}, retry: () => false };
-  const scope = { BiliSmoothSession: session, BiliSmoothSettings: settings,
-    location: { origin: 'https://www.bilibili.com', reload: () => calls.push('reload') },
+  const scope = { location: { origin: 'https://www.bilibili.com', reload: () => calls.push('reload') },
     addEventListener: (type, fn) => callbacks.push(fn), postMessage: message => responses.push(message), setTimeout: fn => timers.push(fn) };
-  const context = vm.createContext(scope);
-  vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../../src/page/control-bridge.js'), 'utf8'), context);
+  installControlBridge({ scope, runtime });
   return { responses, timers, calls,
     pending() { persisted = new Promise((resolve, fail) => { settle = resolve; reject = fail; }); },
     saved() { settle(); }, failed() { reject(Error('disk full')); },
     send(action, patch, badOrigin = false) {
-      context.message = { __biliSmooth: 'request', id: 'request', action, patch }; context.callbacks = callbacks;
-      context.origin = badOrigin ? 'https://evil.example' : scope.location.origin;
-      return vm.runInContext('callbacks[0]({source:globalThis,origin,data:message})', context);
+      return callbacks[0]({ source: scope, origin: badOrigin ? 'https://evil.example' : scope.location.origin, data: { __biliSmooth: 'request', id: 'request', action, patch } });
     } };
 }
 test('save response waits for persistence and preserves patch validation', async () => {
@@ -39,4 +36,7 @@ test('successful refresh acknowledges saved settings before navigation', async (
 test('diagnostics are independent of save failures and origins are checked', async () => {
   const b = bridge(); await b.send('diagnostics', undefined, true); assert.equal(b.responses.length, 0);
   await b.send('diagnostics'); assert.deepEqual(b.responses[0].result.events, ['retained']);
+});
+test('unknown commands are refused by name', async () => {
+  const b = bridge(); await b.send('format-disk'); assert.equal(b.responses[0].ok, false); assert.equal(b.responses[0].error, 'unknown-command');
 });

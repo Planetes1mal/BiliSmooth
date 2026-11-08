@@ -1,10 +1,13 @@
-'use strict';
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const { EventEmitter } = require('node:events');
-const vm = require('node:vm');
-const { makeSchedule, normalizeVideos, createNetworkTracker, summarizeRun, matchesDefaultRuntime, segmentJumps } = require('../../scripts/checks/benchmark.cjs');
-
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { EventEmitter } from 'node:events';
+import crypto from 'node:crypto';
+import benchmark from '../../scripts/checks/benchmark.cjs';
+import cdn from '../../scripts/checks/cdn.cjs';
+import settings from '../../src/core/settings.js';
+const { makeSchedule, normalizeVideos, createNetworkTracker, summarizeRun, matchesDefaultRuntime, segmentJumps, measuredPhaseSummary, qualityCoverage, summarizeGroups, summarizeComparisons } = benchmark;
+const { randomOffset, measureInBrowser } = cdn;
 test('benchmark rotates native/P0/P1 and optional upstream arms with startup and reload in one profile', () => {
   const at = Date.parse('2026-10-08T16:00:00Z');
   const videos = normalizeVideos([{ id: 'BVpopularfixture', set: 'popular', viewCount: 1000001, publishedAt: '2026-09-01T00:00:00Z' },
@@ -19,7 +22,7 @@ test('benchmark rotates native/P0/P1 and optional upstream arms with startup and
 });
 
 test('default automatic host rotation is valid but changed user preferences are not', () => {
-  const defaults = require('../../src/core/settings.js').normalize({});
+  const defaults = settings.normalize({});
   const rotated = { ...defaults, pcdnHost: defaults.candidatePool[1] };
   assert.equal(matchesDefaultRuntime(rotated, defaults), true);
   assert.equal(matchesDefaultRuntime({ ...rotated, selection: 'fixed' }, defaults), false);
@@ -96,8 +99,6 @@ test('extensionless MCDN and proxied media remain recorded with their actual del
 });
 
 test('measured phases exclude hidden delivery and random CDN offsets keep one comparable interval', async () => {
-  const { measuredPhaseSummary, qualityCoverage, summarizeGroups, summarizeComparisons } = require('../../scripts/checks/benchmark.cjs');
-  const { randomOffset, measureInBrowser } = require('../../scripts/checks/cdn.cjs');
   const origin = Date.parse('2026-10-08T16:00:00Z');
   const samples = Array.from({ length: 325 }, (_, i) => ({ at: i * 250, videoId: 1, frames: i < 4 ? 0 : i - 3,
     visibility: i >= 40 && i < 80 ? 'hidden' : 'visible', nativeQuality: { realQ: 116 },
@@ -126,7 +127,7 @@ test('measured phases exclude hidden delivery and random CDN offsets keep one co
   paired[2].summary[0].observedConditions.dimensions = ['1280x720'];
   assert.equal(summarizeComparisons(paired, arms)[0].sameObservedQualityAndRate, false);
   let requestedRange;
-  const scoped = { URL, Uint8Array, AbortController, setTimeout, clearTimeout, crypto: require('node:crypto').webcrypto,
+  const scoped = { URL, Uint8Array, AbortController, setTimeout, clearTimeout, crypto: crypto.webcrypto,
     performance, input: { url: 'https://media.example/fixture.m4s', offset: 100, maxBytes: 4, timeoutMs: 1000 },
     fetch: async (_url, init) => { requestedRange = init.headers.Range; const response = new Response(Uint8Array.from([1, 2, 3, 4]), { status: 206, headers: { 'content-range': 'bytes 100-103/200', 'content-type': 'video/mp4' } }); Object.defineProperty(response, 'url', { value: _url }); return response; } };
   const measured = await vm.runInNewContext(`(${measureInBrowser.toString()})(input)`, scoped);

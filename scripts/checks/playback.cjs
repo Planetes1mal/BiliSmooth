@@ -287,16 +287,13 @@ async function observeVariant(directory, extension, variant, authState) {
         valid: !!scheduler?.candidate && scheduler.version === expectedVersion && scheduler.config?.enabled === variant.enabled && scheduler.startupReady !== false };
       phase.mediaErrorCount = report.mediaErrors.filter(event => event.variant === variant.name && event.phase === phaseName).length;
       phase.connection = { timeOrigin: observation.timeOrigin, initial: observation.initialConnection, events: observation.connectionEvents };
-      phase.candidateDiagnostics = await page.evaluate(() => window.BiliSmoothSession?.getDiagnostics() || null);
+      phase.candidateDiagnostics = await page.evaluate(() => window.BiliSmoothRuntime?.getDiagnostics() || null);
       if (phase.candidateDiagnostics) {
         const d = phase.candidateDiagnostics;
-        phase.networkSummary = { networkEpoch: d.networkEpoch, probeBytes: d.probeBytes,
+        phase.networkSummary = { networkEpoch: d.networkEpoch,
           resetEvents: d.events.filter(event => event.type === 'network-reset'),
-          probeStarts: d.events.filter(event => event.type === 'probe-start'),
-          probeFinishes: d.events.filter(event => event.type === 'probe-finished'),
-          completedProbeCounts: d.events.filter(event => event.type === 'probe').reduce((counts, event) => {
-            counts[event.host] = (counts[event.host] || 0) + 1; return counts;
-          }, {}) };
+          races: d.session?.races?.map(race => ({ at: race.at, trigger: race.trigger, currentHost: race.currentHost, contenders: race.contenders, verdict: race.verdict, winner: race.winner, switched: race.switched })) || [],
+          switches: d.session?.switches || [], switchCount: d.session?.switchCount ?? null, syntheticTimeouts: d.session?.syntheticTimeouts || null };
       }
       phase.summary.playActionToFirstFrameMs = phase.playActionAt === undefined || phase.summary.firstFrameFromNavigationMs === null ? null
         : Math.max(0, phase.summary.firstFrameFromNavigationMs - phase.playActionAt);

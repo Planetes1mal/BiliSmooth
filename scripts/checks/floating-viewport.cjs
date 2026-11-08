@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '../..');
 const version = require('../../package.json').version;
 const label = runLabel() || 'current';
 const output = createEvidenceOutput({ root, suite: 'viewport' });
-const sources = ['src/core/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js', 'src/page/floating-control.js'];
+const sources = ['dist/extension/settings.js', 'src/ui/surface.js', 'src/ui/entry-display.js', 'src/ui/motion-runtime.js', 'src/ui/choice.js', 'src/page/floating-control.js'];
 const specs = [
   { name: 'classic-scrollbar', gutter: 'auto' },
   { name: 'stable-scrollbar', gutter: 'stable' },

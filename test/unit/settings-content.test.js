@@ -1,14 +1,18 @@
-const test = require('node:test'), assert = require('node:assert/strict');
-const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
-const settings = require('../../src/core/settings.js');
-const migration = require('../../src/core/settings-migration.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import fs from 'node:fs';
+import path from 'node:path';
+import settings from '../../src/core/settings.js';
+import migration from '../../src/core/settings-migration.js';
+const pkg = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 const flush = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
 function extension(initial = {}) {
   const updates = new Set(), removals = new Set(), reloads = [], tabUpdates = [];
   let omitTabUrl = false, autoCompleteReload = true;
-  const completeReload = id => { viewVersion = require('../../package.json').version; for (const fn of [...updates]) fn(id, { status: 'complete' }); };
+  const completeReload = id => { viewVersion = pkg.version; for (const fn of [...updates]) fn(id, { status: 'complete' }); };
   const store = structuredClone(initial), changes = [], listeners = [], actionListeners = [], messages = [], writes = [], tabs = [];
-  let failWrite = false, failRead = false, failOpen = false, viewVersion = require('../../package.json').version;
+  let failWrite = false, failRead = false, failOpen = false, viewVersion = pkg.version;
   const sender = { id: 'test-extension', tab: { id: 27, url: 'https://www.bilibili.com/video/BVfixture' } };
   const storage = { get: async () => { if (failRead) throw Error('read denied'); return structuredClone(store); }, set: async data => {
     if (failWrite) throw Error('disk full');
@@ -22,20 +26,20 @@ function extension(initial = {}) {
   const request = (message, source = { id: sender.id }) => new Promise((resolve, reject) => {
     messages.push(message); let accepted = false;
     if (message.channel === 'bilismooth-control' && message.action === 'locate' && tabs.length) { resolve({ ok: true, tabId: tabs[0].id, version: viewVersion }); return; }
-    if (message.channel === 'bilismooth-control' && message.action === 'select-tab' && viewVersion === require('../../package.json').version && tabs.length) { const url = new URL(tabs[0].url); url.searchParams.set('tab', String(message.tabId)); tabs[0].url = url.href; resolve({ ok: true }); return; }
+    if (message.channel === 'bilismooth-control' && message.action === 'select-tab' && viewVersion === pkg.version && tabs.length) { const url = new URL(tabs[0].url); url.searchParams.set('tab', String(message.tabId)); tabs[0].url = url.href; resolve({ ok: true }); return; }
     for (const fn of listeners) if (fn(message, source, resolve)) accepted = true;
     if (!accepted) reject(Error('no receiver'));
   });
   const chrome = { storage: { local: storage, onChanged: { addListener: fn => changes.push(fn) } },
     runtime: { id: 'test-extension', getURL: file => 'chrome-extension://test-extension/' + file,
-      getManifest: () => ({ version: require('../../package.json').version }),
+      getManifest: () => ({ version: pkg.version }),
       onMessage: { addListener: fn => listeners.push(fn) }, sendMessage: request }, action: { onClicked: { addListener: fn => actionListeners.push(fn) } },
     tabs: { onUpdated: { addListener: fn => updates.add(fn), removeListener: fn => updates.delete(fn) }, onRemoved: { addListener: fn => removals.add(fn), removeListener: fn => removals.delete(fn) },
       reload: async id => { reloads.push(id); for (const fn of [...updates]) fn(id, { status: 'loading' }); if (autoCompleteReload) Promise.resolve().then(() => completeReload(id)); },
       query: async () => tabs, get: async id => { const tab = { ...tabs.find(tab => tab.id === id) }; if (omitTabUrl) delete tab.url; return tab; }, create: async tab => { if (failOpen) throw Error('cannot-open'); tabs.push({ ...tab, id: tabs.length + 10, windowId: 1 }); },
       update: async (id, change) => { tabUpdates.push({ id, ...change }); return Object.assign(tabs.find(tab => tab.id === id), change); } },
     windows: { update: async () => {} } };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/extension/background.js'), 'utf8'), {
+  vm.runInNewContext(fs.readFileSync(path.join(import.meta.dirname, '../../src/extension/background.js'), 'utf8'), {
     chrome, importScripts() {}, BiliSmoothSettings: settings, BiliSmoothSettingsMigration: migration, URL, setTimeout, clearTimeout
   });
   function content({ unreachable = false } = {}) {
@@ -47,7 +51,7 @@ function extension(initial = {}) {
       postMessage: message => posted.push(message), addEventListener: (type, fn) => { if (type === 'message') events.push(fn); } };
     scope.window = scope;
     const context = vm.createContext(scope);
-    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../src/extension/content.js'), 'utf8'), context);
+    vm.runInContext(fs.readFileSync(path.join(import.meta.dirname, '../../src/extension/content.js'), 'utf8'), context);
     function message(data) { context.input = data; context.events = events; vm.runInContext('events.forEach(fn=>fn({source:window,origin:location.origin,data:input}))', context); }
     return { posted, message, runtime, sent };
   }

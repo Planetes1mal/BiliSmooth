@@ -1,7 +1,10 @@
-const test = require('node:test'), assert = require('node:assert/strict');
-const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
-const { spawnSync } = require('node:child_process');
-const source = path.resolve(__dirname, '../..');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
+const source = path.resolve(import.meta.dirname, '../..');
 const validator = import('../../scripts/commit.mjs');
 
 function fixture(t) {

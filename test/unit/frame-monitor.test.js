@@ -1,7 +1,6 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { create } = require("../../src/page/frame-monitor");
-
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { create } from '../../src/page/frame-monitor.js';
 function fixture({fps=60,rate=1}={}) {
   const monitor=create();monitor.reset(0);
   const sample=(now,extra={})=>monitor.sample({now,playhead:now/1000*rate,active:true,grace:false,fps,rate,...extra});
