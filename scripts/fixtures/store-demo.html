@@ -68,20 +68,54 @@
       const graphics = canvas.getContext('2d');
       const scale = Math.max(canvas.width / artwork.width, canvas.height / artwork.height);
       const width = artwork.width * scale, height = artwork.height * scale;
-      const draw = () => {
-        const zoom = motion ? 1.015 + Math.sin(performance.now() / 6000) * .008 : 1;
+      // One loop of the artwork; with motion a slow zoom that ends where it starts, so the loop is seamless.
+      const loop = motion ? 6 : 2;
+      const draw = seconds => {
+        const zoom = motion ? 1.015 + Math.sin(seconds / loop * 2 * Math.PI) * .008 : 1;
         graphics.drawImage(artwork, (canvas.width - width * zoom) / 2,
           (canvas.height - height * zoom) / 2, width * zoom, height * zoom);
       };
-      draw();
+      // Record that loop once, then play it through Media Source Extensions like Bilibili's player, keeping a real
+      // buffer ahead of the playhead. Nothing is downloaded, so speed stays unknown.
+      const type = 'video/webm;codecs=vp8';
+      const stream = canvas.captureStream(0), track = stream.getVideoTracks()[0];
+      const recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 4000000 });
+      const chunks = [];
+      recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+      const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+      recorder.start();
+      const begin = performance.now();
+      await new Promise(resolve => {
+        const frame = () => {
+          const seconds = (performance.now() - begin) / 1000;
+          draw(Math.min(seconds, loop)); track.requestFrame();
+          if (seconds < loop) setTimeout(frame, 1000 / 30); else resolve();
+        };
+        frame();
+      });
+      recorder.stop(); await stopped; track.stop();
+      const clip = await new Blob(chunks, { type }).arrayBuffer();
       const video = document.querySelector('video');
-      video.srcObject = canvas.captureStream(motion ? 60 : 30);
-      if (motion) {
-        const animate = () => { draw(); requestAnimationFrame(animate); };
-        requestAnimationFrame(animate);
-      } else {
-        setInterval(draw, 1000 / 30);
-      }
+      const source = new MediaSource();
+      video.src = URL.createObjectURL(source);
+      await new Promise(resolve => source.addEventListener('sourceopen', resolve, { once: true }));
+      const buffer = source.addSourceBuffer(type);
+      buffer.mode = 'sequence';
+      const append = () => new Promise((resolve, reject) => {
+        buffer.addEventListener('updateend', resolve, { once: true });
+        buffer.addEventListener('error', reject, { once: true });
+        buffer.abort();
+        buffer.appendBuffer(clip);
+      });
+      const ahead = () => buffer.buffered.length ? buffer.buffered.end(buffer.buffered.length - 1) - video.currentTime : 0;
+      let filling = false;
+      const fill = async () => {
+        if (filling) return;
+        filling = true;
+        try { while (ahead() < 36) await append(); } finally { filling = false; }
+      };
+      await fill();
+      setInterval(() => { fill().catch(error => console.error(error)); }, 1000);
       await video.play();
       const toggle = document.querySelector('#playback');
       toggle.addEventListener('click', async () => {

@@ -263,8 +263,9 @@ before uploading an attachment or replacing the README demonstration.`);
       pointer,
       camera: [
         { time: 0, scale: 1, x: 640, y: 400 },
-        { time: 1.35, scale: 1, x: 640, y: 400 },
-        { time: 3.4, scale: 1.32, ...focus },
+        // Full frame through the hover preview; zoom in only once the click opens the panel.
+        { time: 3.4, scale: 1, x: 640, y: 400 },
+        { time: 4.6, scale: 1.32, ...focus },
         { time: 6.8, scale: 1.32, ...focus },
         { time: 8.3, scale: 1.28, ...focus },
         { time: 12.1, scale: 1.28, ...focus },
