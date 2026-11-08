@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/github/v/release/Planetes1mal/BiliSmooth?color=0f766e&label=version)](https://github.com/Planetes1mal/BiliSmooth/releases/latest)
 [![License](https://img.shields.io/github/license/Planetes1mal/BiliSmooth?color=64748b)](./LICENSE)
 
-Switch CDN routes for Bilibili videos and see download speed and playable buffer beside the player.
+Switch CDN routes for Bilibili videos and see download speed and buffered time beside the player.
 
 [Download](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [Changelog](./CHANGELOG.md) · [Report an issue](https://github.com/Planetes1mal/BiliSmooth/issues)
 
@@ -15,8 +15,8 @@ https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
 
 ## Features
 
-- **Status beside the video:** see download speed, playable buffer and the active route in a panel you can drag, dock or collapse.
-- **Buffer adjusted for playback speed:** 20 seconds of buffered video shows about 10 seconds of playable time at 2× speed.
+- **Status beside the video:** see download speed, buffered time and the active server in a control you can drag, dock or collapse.
+- **Buffer adjusted for playback speed:** 20 seconds of buffered video shows as about 10 seconds at 2× speed.
 - **Automatic or manual routing:** let BiliSmooth select a CDN or keep a fixed route. Try an alternate route when playback stalls.
 - **A separate dashboard:** view download history and route information, adjust settings, and choose Chinese or English with a light or dark theme.
 
@@ -29,7 +29,7 @@ For desktop Chrome and Edge. Chrome requires version 120 or later.
 ### Chrome Web Store
 
 1. Open the [Chrome Web Store](https://chromewebstore.google.com/detail/obhciaoeldnglalhhkmopkdolkonipfd) and click **Add to Chrome**.
-2. Refresh your Bilibili video page to load the floating panel. Click the extension's browser toolbar icon to open the dashboard.
+2. Refresh your Bilibili video page to load the floating control. Click the extension's browser toolbar icon to open the dashboard.
 
 ### Manual installation from a GitHub ZIP
 
@@ -37,7 +37,7 @@ For desktop Chrome and Edge. Chrome requires version 120 or later.
 2. Open `chrome://extensions`, or `edge://extensions` in Edge.
 3. Enable **Developer mode**, then click **Load unpacked**.
 4. Select the extracted folder containing `manifest.json`.
-5. Refresh your Bilibili video page to load the floating panel. Click the extension's browser toolbar icon to open the dashboard.
+5. Refresh your Bilibili video page to load the floating control. Click the extension's browser toolbar icon to open the dashboard.
 
 Download the BiliSmooth installation ZIP, rather than GitHub's **Source code** archives. Keep the extracted folder in place; the browser loads the extension from it.
 
@@ -45,9 +45,9 @@ Download the BiliSmooth installation ZIP, rather than GitHub's **Source code** a
 
 ## Use
 
-Open a Bilibili video as usual. Automatic routing is on by default. Click the floating panel to expand its controls, choose a route or adjust the display. Selecting a fixed route pauses automatic switching.
+Open a Bilibili video as usual. The server is set to “Automatic” by default. Hover over the floating control for metrics, or click it to choose a server or test speed. Choosing a fixed server pauses automatic switching. Choose what the collapsed control shows in the dashboard's settings.
 
-To return to the site's original routing, turn off optimization in the floating panel and refresh the page when prompted.
+To return to the site's original routing, choose “Bilibili default” in the floating control and refresh the page when prompted.
 
 BiliSmooth preserves the quality selected in the player. It does not unlock paid quality options or bypass regional restrictions. Route performance varies with your network.
 

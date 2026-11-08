@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/github/v/release/Planetes1mal/BiliSmooth?color=0f766e&label=version)](https://github.com/Planetes1mal/BiliSmooth/releases/latest)
 [![License](https://img.shields.io/github/license/Planetes1mal/BiliSmooth?color=64748b)](./LICENSE)
 
-为 B 站网页播放切换 CDN 线路，在视频旁查看下载速度和缓冲余量。
+为 B 站网页播放切换 CDN 线路，在视频旁查看下载速度和已缓冲时长。
 
 [下载](https://github.com/Planetes1mal/BiliSmooth/releases/latest) · [更新记录](./CHANGELOG.md) · [反馈问题](https://github.com/Planetes1mal/BiliSmooth/issues)
 
@@ -15,8 +15,8 @@ https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
 
 ## 功能
 
-- **边看边查看状态**：浮窗显示下载速度、可播余量和当前线路，支持拖动、贴边和收起。
-- **按倍速显示可播时长**：例如已缓冲 20 秒视频，在 2 倍速下显示约 10 秒可播余量。
+- **边看边查看状态**：浮窗显示下载速度、已缓冲时长和当前线路，支持拖动、贴边和收起。
+- **按倍速换算已缓冲时长**：例如缓冲了 20 秒视频，在 2 倍速下显示约 10 秒。
 - **自动或手动选线**：自动选择 CDN，也可以固定一条线路；播放卡住时，可尝试备用线路。
 - **集中查看和调整**：仪表盘提供下载曲线、线路信息和设置，支持中英文界面、浅色与深色主题。
 
@@ -45,9 +45,9 @@ https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
 
 ## 使用
 
-正常打开 B 站视频即可，默认开启自动选线。点击浮窗可展开控制面板，选择线路或调整显示内容；手动固定线路后，自动换线会暂停。
+正常打开 B 站视频即可，线路默认为“自动选择”。鼠标移到浮窗上查看指标，点击展开后可以选择线路或测速；固定使用一条线路后，自动换线会暂停。浮窗收起时显示什么，在仪表盘的设置中选择。
 
-需要恢复原站播放线路时，在浮窗中关闭优化，并按提示刷新视频页。
+需要恢复原站播放线路时，在浮窗中把线路选为“B站默认”，并按提示刷新视频页。
 
 扩展保留播放器中选择的画质，不会解锁会员清晰度或地区限制。不同网络下的线路表现可能不同。
 
