@@ -126,7 +126,7 @@ function retimeMP4(buffer) {
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help')) {
-    console.log(`Usage: npm run demo:record [-- --locale=en]
+    console.log(`Usage: npm run store:demo [-- --locale=en]
 
 Build the extension first with npm run build. Requires Playwright Chromium.
 Records the actual floating controls and composes a local 60 fps H.264 preview
