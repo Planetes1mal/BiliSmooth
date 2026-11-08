@@ -27,6 +27,8 @@ function boot(scope) {
   let anchor = null, snapped = { x: null, y: null }, preference = 'bottomRight', lastPlacement = null, settle = null;
   let menu = null, busy = false, feedback = { text: '', tone: '', kind: '' }, route = '', generation = null, wasFullscreen = false, testSeen = false;
   let renderFrame = null, layoutFrame = null, hostSize = '', unsubscribe = null, openingSerial = 0, signature = '';
+  // Settings → Floating control → Show on video pages; off leaves the control unmounted until it is turned on again.
+  let allowed = runtime.getConfig().showFloating !== false;
 
   try {
     const saved = JSON.parse(scope.localStorage.getItem(POSITION_KEY) || 'null');
@@ -42,9 +44,10 @@ function boot(scope) {
   const setText = (node, value) => { if (node && node.textContent !== value) node.textContent = value; };
   const setHtml = (node, value) => { if (node && node.dataset.html !== value) { node.innerHTML = value; node.dataset.html = value; } };
 
-  // Only video, bangumi and list playback paths get a control, with or without a language prefix (/en/, /zh-Hans/).
+  // Only video, bangumi and list playback paths get a control, with or without a language prefix (/en/, /zh-Hans/),
+  // and only while the setting allows it.
   function routeKey() {
-    if (!/^(?:www\.)?bilibili\.com$/i.test(scope.location.hostname)) return '';
+    if (!allowed || !/^(?:www\.)?bilibili\.com$/i.test(scope.location.hostname)) return '';
     const path = scope.location.pathname;
     if (/^\/(?:[a-z]{2}(?:-[A-Za-z]{2,4})?\/)?(?:video\/(?:BV[a-z0-9]+|av\d+)|bangumi\/play\/(?:ep|ss)\d+)\/?$/i.test(path)) return path;
     if (!/^\/(?:[a-z]{2}(?:-[A-Za-z]{2,4})?\/)?list\/(?:watchlater|ml\d+)\/?$/i.test(path)) return '';
@@ -746,6 +749,13 @@ function boot(scope) {
   listen(document, 'pointerdown', event => {
     if (mounted && !drag && phase !== 'edge' && !event.composedPath().includes(host)) { pointerInside = false; previewDismissed = true; setPhase('edge'); }
   }, true);
+  // The setting can change while the page is open (from the dashboard or another tab): unmount or mount at once.
+  cleanups.push(runtime.subscribe(() => {
+    const next = runtime.getConfig().showFloating !== false;
+    if (next === allowed) return;
+    allowed = next;
+    syncLifecycle(); queueLayout();
+  }));
   listen(scope, 'resize', queueLayout);
   if (scope.visualViewport) { listen(scope.visualViewport, 'resize', queueLayout); listen(scope.visualViewport, 'scroll', queueLayout); }
   // Scrolling moves page regions under a fixed control; that matters only before the first placement.

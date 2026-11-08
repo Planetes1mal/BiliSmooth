@@ -94,6 +94,19 @@ test('mounts collapsed on video paths only (also under a language prefix), avoid
   await context.close();
 });
 
+test('the Settings switch keeps the control off video pages and mounts it again without a reload', async () => {
+  const { page, context, host, errors } = await fixture({ state: { config: { showFloating: false } } });
+  await page.waitForTimeout(200);
+  assert.equal(await host.count(), 0, 'off: not mounted');
+  await mutate(page, () => { fixture.state.config = BiliSmoothSettings.normalize({ ...fixture.state.config, showFloating: true }); fixture.notify(); });
+  await host.waitFor({ state: 'visible' });
+  await mutate(page, () => { fixture.state.config = BiliSmoothSettings.normalize({ ...fixture.state.config, showFloating: false }); fixture.notify(); });
+  assert.equal(await host.count(), 0, 'turned off: unmounted');
+  assert.equal(await page.evaluate(() => BiliSmoothFloating.resetPosition()), true, 'Reset position still answers the dashboard');
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
 test('a header that renders after the first placement sends the collapsed control to a clear corner', async () => {
   const { page, context, host } = await fixture();
   await host.waitFor({ state: 'visible' });

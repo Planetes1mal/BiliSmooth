@@ -153,6 +153,18 @@ test('starting on the fastest tested server saves at once and applies with Autom
   assert.equal(await fixed.locator('.line').filter({ has: fixed.getByRole('switch', { name }) }).getAttribute('class'), 'line off');
 });
 
+test('the floating control switch saves, dims the rest of its card and survives Restore defaults', async t => {
+  const page = await open(t, { hash: 'settings' });
+  const shown = page.getByRole('switch', { name: '在视频页显示浮窗' });
+  assert.equal(await shown.isChecked(), true);
+  await shown.click();
+  assert.deepEqual((await waitSent(page, 1, 'config')).map(call => call.patch), [{ showFloating: false }]);
+  await page.locator('.etiles.off').waitFor();
+  await page.getByRole('button', { name: '恢复默认设置' }).click();
+  await page.locator('dialog[open] button[value=ok]').click();
+  assert.equal((await waitSent(page, 2, 'config')).at(-1).patch.showFloating, false);
+});
+
 test('a failed save is shown, rolled back and retried', async t => {
   const page = await open(t, { hash: 'settings' });
   const ports = page.getByRole('switch', { name: '识别带端口的地址' });

@@ -18,7 +18,7 @@ export const SCHEMA_VERSION = 5;
 export const defaults = Object.freeze({ schemaVersion: SCHEMA_VERSION, enabled: true, selection: 'auto', mode: 'bad-only',
   pcdnHost: candidatePool[0], candidatePool, customHosts: Object.freeze([]), mcdnStrategy: 'proxy-all', proxyHost: 'proxy-tf-all-ws.bilivideo.com',
   portHeuristic: true, stallRecovery: true, startOnBest: true, rewriteAkamai: false, p2pGuard: false,
-  lang: 'zh', accent: 'blue', theme: 'system', floatingEntryType: 'icon', maxDepth: 20 });
+  lang: 'zh', accent: 'blue', theme: 'system', floatingEntryType: 'icon', showFloating: true, maxDepth: 20 });
 export const cacheKey = 'bilismooth.startup.v4';
 
 function cleanHost(raw) {
@@ -48,7 +48,7 @@ function customList(list) {
 export function patch(value) {
   const raw = value && typeof value === 'object' ? value : {}, result = {};
   const input = { ...raw, accent: legacyAccents[raw.accent] || raw.accent, floatingEntryType: legacyEntryTypes[raw.floatingEntryType] || raw.floatingEntryType };
-  for (const key of ['enabled', 'portHeuristic', 'stallRecovery', 'startOnBest', 'rewriteAkamai', 'p2pGuard'])
+  for (const key of ['enabled', 'portHeuristic', 'stallRecovery', 'startOnBest', 'rewriteAkamai', 'p2pGuard', 'showFloating'])
     if (typeof input[key] === 'boolean') result[key] = input[key];
   for (const [key, values] of Object.entries({ selection: ['auto', 'fixed'], mode: ['off', 'bad-only', 'force'],
     mcdnStrategy: ['proxy-all', 'proxy-v1', 'replace'], lang: ['zh', 'en'], accent: accents, theme: ['system', 'light', 'dark'], floatingEntryType: floatingEntryTypes }))

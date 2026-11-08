@@ -74,6 +74,7 @@ export const strings = Object.freeze({
 
   // Settings
   floating: ['浮窗', 'Floating control'], collapsedShows: ['收起时显示', 'When collapsed, show'],
+  showFloating: ['在视频页显示浮窗', 'Show on video pages'],
   entryIcon: ['状态图标', 'Status icon'], entryBuffer: ['已缓冲', 'Buffered'], entrySpeed: ['下载速度', 'Download speed'], entryCombined: ['速度和缓冲', 'Speed and buffer'],
   position: ['位置', 'Position'], playback: ['播放', 'Playback'], stallSwitch: ['卡顿时自动换线', 'Switch servers on stall'], automaticOnly: ['仅在自动选择时', 'With Automatic only'],
   appearance: ['外观', 'Appearance'], theme: ['主题', 'Theme'], system: ['跟随系统', 'System'], light: ['浅色', 'Light'], dark: ['深色', 'Dark'],

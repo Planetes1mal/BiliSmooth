@@ -82,6 +82,16 @@ test('earlier accent and entry choices map to their new equivalent or reset; pla
   assert.equal(settings.normalize({ accent: 'violet', floatingEntryType: 'resolution' }).floatingEntryType, 'icon');
 });
 
+test('the floating control switch defaults on, keeps only a boolean and needs no migration', async () => {
+  assert.equal(settings.normalize().showFloating, true);
+  assert.equal(settings.normalize({ showFloating: false }).showFloating, false);
+  assert.deepEqual(settings.patch({ showFloating: 'off' }), {});
+  const { showFloating, ...saved } = settings.normalize({ lang: 'en' });
+  const h = extension({ [migration.key]: saved });
+  assert.equal((await h.command('read')).result.showFloating, true);
+  assert.equal(h.writes.length, 0, 'a record from before the switch is not rewritten');
+});
+
 test('teal saved before schema 5 becomes blue once; teal chosen afterwards stays', async () => {
   const h = extension({ [migration.key]: { ...settings.normalize({ lang: 'en' }), accent: 'teal', schemaVersion: 4 } });
   assert.equal((await h.command('read')).result.accent, 'blue');

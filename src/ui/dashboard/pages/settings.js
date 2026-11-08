@@ -1,4 +1,4 @@
-// Settings: the floating control (collapsed display, position), playback, appearance, compatibility
+// Settings: the floating control (shown or not, collapsed display, position), playback, appearance, compatibility
 // and Restore defaults. Every change saves at once.
 import settings from '../../../core/settings.js';
 import * as format from '../../shared/format.js';
@@ -18,7 +18,9 @@ export function createSettings(stack, app) {
   const save = key => value => app.save({ [key]: value });
   const card = (key, ...children) => h('section.card', h('h2', { 'data-t': key }), ...children);
 
-  // Floating control: the four collapsed displays, each previewing the current numbers.
+  // Floating control: whether it shows on video pages, then the four collapsed displays, each previewing the current
+  // numbers. While it is off the rest of the card dims but still saves, for when it is turned on again.
+  const shown = toggle('showFloating', save('showFloating'));
   const tiles = settings.floatingEntryTypes.map(type => {
     const input = h('input', { type: 'radio', name: 'entry', value: type, onchange: () => input.checked && app.save({ floatingEntryType: type }) });
     const pill = h('span.fc-entry' + (type === 'icon' ? '.round' : ''), { 'aria-hidden': 'true' });
@@ -27,8 +29,9 @@ export function createSettings(stack, app) {
     return { type, input, pill, tile };
   });
   const position = h('button.btn', { type: 'button', 'data-t': 'resetPosition', onclick: async () => { if (await app.act('position', 'resetFloatingPosition')) app.toast(app.t('positionReset'), 'ok'); } });
-  const floating = card('floating', h('div.rows', h('div.line.label', h('b', { 'data-t': 'collapsedShows' }))),
-    h('div.etiles', { role: 'radiogroup', 'data-t-label': 'collapsedShows' }, tiles.map(item => item.tile)), h('div.rows', line('position', position)));
+  const entryTiles = h('div.etiles', { role: 'radiogroup', 'data-t-label': 'collapsedShows' }, tiles.map(item => item.tile));
+  const positionRow = line('position', position);
+  const floating = card('floating', h('div.rows', line('showFloating', shown), h('div.line.label', h('b', { 'data-t': 'collapsedShows' }))), entryTiles, h('div.rows', positionRow));
 
   const start = toggle('startSwitch', save('startOnBest'));
   const startRow = line('startSwitch', start, 'automaticOnly');
@@ -72,11 +75,11 @@ export function createSettings(stack, app) {
   arrange();
   wide.addEventListener('change', arrange);
 
-  // Server and playback settings return to defaults; appearance, the collapsed display and the log stay.
+  // Server and playback settings return to defaults; appearance, the floating control's settings and the log stay.
   async function restoreDefaults() {
     if (!await app.confirm({ title: 'restoreQuestion', detail: 'restoreDetail', accept: 'restore' })) return;
-    const { theme, lang, accent, floatingEntryType } = app.config;
-    app.save({ ...settings.defaults, theme, lang, accent, floatingEntryType }, { done: 'restored' });
+    const { theme, lang, accent, floatingEntryType, showFloating } = app.config;
+    app.save({ ...settings.defaults, theme, lang, accent, floatingEntryType, showFloating }, { done: 'restored' });
   }
 
   function entryNumbers() {
@@ -106,6 +109,8 @@ export function createSettings(stack, app) {
       item.tile.classList.toggle('on', on);
       renderPill(item, values, tone);
     }
+    shown.checked = config.showFloating !== false;
+    for (const node of [entryTiles, positionRow]) node.classList.toggle('off', !shown.checked);
     position.disabled = !connected || app.busy('position');
     start.checked = config.startOnBest !== false;
     startRow.classList.toggle('off', serverChoice(config) !== 'auto');
