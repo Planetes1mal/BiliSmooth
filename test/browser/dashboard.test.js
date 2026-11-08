@@ -37,13 +37,15 @@ function install({ version, state, config, tabs }) {
     runtime: { id: 'fixture', getManifest: () => ({ version }), onMessage: noop,
       async sendMessage(message) {
         fx.calls.push(clone(message));
-        if (message.action === 'patch') Object.assign(fx.config, message.patch);
+        if (message.action === 'patch') { await fx.hold; Object.assign(fx.config, message.patch); }
         return { ok: true, result: clone(fx.config) };
       } },
     tabs: { async query() { return clone(fx.tabs); }, async getCurrent() { return { id: 9 }; }, async update(id) { return { id, windowId: 1 }; },
       async reload(id) { fx.reloads.push(id); },
       async sendMessage(tabId, message) {
         fx.calls.push({ tabId, ...clone(message) });
+        if (fx.silent) return undefined;
+        await fx.tabHold;
         if (['config', 'applyRoute', 'reload'].includes(message.action) && fx.failConfig) return { ok: false, error: 'settings-save-failed' };
         if (message.action === 'config') Object.assign(fx.config, message.patch);
         if (message.action === 'applyRoute') Object.assign(fx.config, { enabled: true, selection: 'fixed', pcdnHost: message.patch.host });
@@ -146,6 +148,25 @@ test('a failed save is shown, rolled back and retried', async t => {
   await notice.waitFor({ state: 'hidden' });
   assert.equal(await ports.isChecked(), false);
   assert.deepEqual((await sent(page, 'config')).map(call => call.patch), [{ portHeuristic: false }, { portHeuristic: false }]);
+});
+
+test('a background save that ends after the tab answers again keeps the tab state', async t => {
+  const page = await open(t, { hash: 'settings' });
+  await page.evaluate(() => { fx.silent = true; return BiliSmoothLive.refresh(true); });
+  await page.waitForFunction(() => BiliSmoothView.status() === 'no-response');
+  // A poll is already waiting on the tab when the setting changes; the tab answers before the background does.
+  await page.evaluate(() => {
+    fx.silent = false; fx.tabHold = new Promise(resolve => { fx.answer = resolve; }); fx.hold = new Promise(resolve => { fx.release = resolve; });
+    BiliSmoothLive.refresh(true);
+  });
+  await page.waitForTimeout(100);
+  await page.getByRole('radio', { name: '深色' }).check();
+  await page.evaluate(() => { fx.tabHold = null; fx.answer(); });
+  await page.waitForFunction(() => BiliSmoothView.status() === 'connected');
+  await page.evaluate(() => fx.release());
+  await page.waitForFunction(() => fx.config.theme === 'dark');
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => typeof BiliSmoothView.getSnapshot()?.media), 'object', 'the snapshot is still the tab state');
 });
 
 test('a reload whose save fails says the video was not reloaded', async t => {

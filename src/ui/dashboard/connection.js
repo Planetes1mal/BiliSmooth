@@ -89,13 +89,14 @@ export function createConnection({ api = globalThis.chrome, buildVersion = '', o
   async function command(action, patch) {
     const token = generation, sequence = ++issued;
     try {
-      let result;
+      // Only a reply from the video tab is its state; the background's reply to a patch carries only the config.
+      let result, fromTab = false;
       if ((action === 'config' || action === 'applyRoute') && !connected()) {
         const mode = state.config.mode === 'off' ? 'bad-only' : state.config.mode;
         result = await patchGlobal(action === 'applyRoute' ? { enabled: true, selection: 'fixed', pcdnHost: patch?.host, mode } : patch);
-      } else result = await request(action, patch);
+      } else { result = await request(action, patch); fromTab = true; }
       if (token !== generation) throw Error('selection-changed');
-      if (action !== 'diagnostics' && connected() && sequence >= applied) { applied = sequence; state.snapshot = result; adopt(result.config); }
+      if (fromTab && action !== 'diagnostics' && connected() && sequence >= applied) { applied = sequence; state.snapshot = result; adopt(result.config); }
       onChange();
       return result;
     } catch (error) {
