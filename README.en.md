@@ -15,9 +15,10 @@ https://github.com/user-attachments/assets/b77ef928-578d-4daf-9b2a-bfd4483d183d
 
 ## Features
 
-- **Status beside the video:** see download speed, buffered time and the active server in a control you can drag, dock or collapse.
+- **Status beside the video:** see download speed, buffered time and the active server in a control you can drag, dock, collapse or turn off.
 - **Buffer adjusted for playback speed:** 20 seconds of buffered video shows as about 10 seconds at 2× speed.
-- **Automatic or manual server choice:** let BiliSmooth pick a CDN server or keep a fixed one. Try another server when playback stalls.
+- **Automatic or manual server choice:** with Automatic, a video starts on the fastest server recently measured in your region, and other servers are compared when playback gets stuck. You can also keep a fixed server.
+- **Your own servers:** add upos or bcache hosts on the Servers page. They join automatic speed tests, and each tested server shows which quality it likely covers.
 - **A separate dashboard:** view download history and server information, adjust settings, and choose Chinese or English with a light or dark theme.
 
 <img src="https://raw.githubusercontent.com/Planetes1mal/BiliSmooth/main/docs/images/dashboard.png" width="960" alt="BiliSmooth dashboard showing playback status, download history and server information">
