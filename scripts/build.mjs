@@ -2,8 +2,8 @@ import { mkdir, readFile, writeFile, readdir, rename, lstat } from 'node:fs/prom
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { buildMotion } from './build-motion.mjs';
-import { extractReleaseNotes } from './changelog.mjs';
+import { buildMotion } from './lib/motion.mjs';
+import { extractReleaseNotes } from './lib/changelog.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const inside = relative => {
@@ -88,10 +88,10 @@ for (const [file, bytes] of outputs) { await mkdir(path.dirname(path.join(stage,
 let backup = null;
 try {
   const stat = await lstat(out); if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Output must be a regular workspace directory');
-  backup = inside(`work/build-backups/extension-${new Date().toISOString().replaceAll(':', '-')}-${process.pid}`);
+  backup = inside(`local/tmp/build-backups/extension-${new Date().toISOString().replaceAll(':', '-')}-${process.pid}`);
   await mkdir(path.dirname(backup), { recursive: true }); await rename(out, backup);
 } catch (error) { if (error.code !== 'ENOENT') throw error; }
 await rename(stage, out);
-await mkdir(inside('outputs'), { recursive: true });
+await mkdir(inside('local/build'), { recursive: true });
 await writeFile(inside(releaseNotes.notesPath), releaseNotes.body);
 console.log(JSON.stringify({ version: pkg.version, output: out, files: outputs.size, previousBuild: backup }));

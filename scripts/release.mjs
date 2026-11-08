@@ -1,13 +1,19 @@
 // One release gate locally and in CI. Git owns pushes; GitHub Actions owns publication.
+// Subcommands: check | package | verify-package | publish | verify.
 import { readFile, mkdir, mkdtemp, copyFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { extractReleaseNotes } from './changelog.mjs';
+import { extractReleaseNotes } from './lib/changelog.mjs';
+import { packageExtension } from './lib/package.mjs';
+import { isMain } from './lib/entry.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const BUILD = path.join(ROOT, 'local', 'build'), TMP = path.join(ROOT, 'local', 'tmp');
 const REPOSITORY = 'Planetes1mal/BiliSmooth', ORIGIN = `https://github.com/${REPOSITORY}.git`;
+// This Mac has python3 and no python; Windows installs python. Override with PYTHON.
+export const PYTHON = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = message => { throw Error(message); };
 async function run(command, args, cwd = ROOT, capture = false) {
@@ -23,17 +29,16 @@ const git = (args, cwd = ROOT) => run('git', args, cwd, true);
 const json = async file => JSON.parse(await readFile(file, 'utf8'));
 
 export async function checkRelease({ root = ROOT, tag } = {}) {
-  const [pkg, lock, manifest, runtime, changelog] = await Promise.all([
+  const [pkg, lock, manifest, changelog] = await Promise.all([
     json(path.join(root, 'package.json')), json(path.join(root, 'package-lock.json')),
-    json(path.join(root, 'src/extension/manifest.json')),
-    readFile(path.join(root, 'src/page/passive-session.js'), 'utf8'), readFile(path.join(root, 'CHANGELOG.md'), 'utf8')]);
+    json(path.join(root, 'src/extension/manifest.json')), readFile(path.join(root, 'CHANGELOG.md'), 'utf8')]);
   const version = pkg.version;
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version) || version === '0.0.0' || version.split('.').some(part => Number(part) > 65535))
     fail('package.json needs a nonzero Chrome x.y.z version with components at most 65535.');
   tag ||= `v${version}`;
   if (tag !== `v${version}`) fail(`Tag ${tag} does not match v${version}.`);
-  if ([lock.version, lock.packages?.['']?.version, manifest.version, runtime.match(/const VERSION = ["']([^"']+)["']/)?.[1]].some(value => value !== version))
-    fail('package.json, package-lock.json, manifest and playback runtime versions must match.');
+  if ([lock.version, lock.packages?.['']?.version, manifest.version].some(value => value !== version))
+    fail('package.json, package-lock.json and manifest versions must match.');
   const { date, notesPath } = extractReleaseNotes(changelog, version);
   let previousTag = null, commits = null, hasGit = false;
   try {
@@ -43,8 +48,13 @@ export async function checkRelease({ root = ROOT, tag } = {}) {
     if (previousTag) commits = (await git(['log', '--format=%h %s', `${previousTag}..HEAD`], root)).split('\n').filter(Boolean);
   } catch { /* A source archive has no local Git range; file checks still apply. */ }
   if (commits && !commits.length) fail(`No commits after ${previousTag}; release check needs a changed revision.`);
-  if (hasGit) await run(process.execPath, ['scripts/check-commit-message.mjs', `--range=${previousTag ? `${previousTag}..HEAD` : 'HEAD'}`], root);
+  // Commits before the one-line rule keep their bodies; attribution is still rejected.
+  if (hasGit) await run(process.execPath, ['scripts/commit.mjs', 'check', `--range=${previousTag ? `${previousTag}..HEAD` : 'HEAD'}`, '--allow-body'], root);
   return { version, tag, date, notesPath, previousTag, commits };
+}
+
+async function verifyPackage(root = ROOT) {
+  await run(PYTHON, ['scripts/lib/verify-package.py'], root);
 }
 
 function apiHeaders(accept = 'application/vnd.github+json') {
@@ -76,7 +86,7 @@ async function verifyAssets(release, spec) {
   const archiveName = `BiliSmooth-${spec.version}.zip`;
   const archive = release.assets.find(asset => asset.name === archiveName), checksum = release.assets.find(asset => asset.name === 'SHA256SUMS.txt');
   if (!archive || !checksum) fail(`Release ${spec.tag} lacks ${archiveName} or SHA256SUMS.txt: ${release.html_url}`);
-  const [remoteArchive, remoteChecksum, localArchive] = await Promise.all([download(archive), download(checksum), readFile(path.join(ROOT, 'outputs', archiveName))]);
+  const [remoteArchive, remoteChecksum, localArchive] = await Promise.all([download(archive), download(checksum), readFile(path.join(BUILD, archiveName))]);
   const hash = verifyAssetBytes({ archive: remoteArchive, checksum: remoteChecksum, localArchive, archiveName });
   const result = { verified: true, tag: spec.tag, release: release.html_url, draft: release.draft, archive: archiveName, sha256: hash };
   console.log(JSON.stringify(result)); return result;
@@ -125,8 +135,8 @@ async function publish(spec, options) {
   if (existing && !existing.draft) fail(`${spec.tag} is already published. Use verify; do not replace its assets or tag.`);
   // A normalized checkout makes local and Linux CI ZIP bytes comparable even
   // when Git considers a Windows worktree with mixed newlines clean.
-  await mkdir(path.join(ROOT, 'work'), { recursive: true });
-  const worktree = await mkdtemp(path.join(ROOT, 'work', 'release-'));
+  await mkdir(TMP, { recursive: true });
+  const worktree = await mkdtemp(path.join(TMP, 'release-'));
   await git(['worktree', 'add', '--detach', worktree, head]);
   console.log(JSON.stringify({ stage: 'build-committed-source', head, worktree }));
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -136,14 +146,14 @@ async function publish(spec, options) {
   try {
     await checkRelease({ root: worktree, tag: spec.tag });
     await npmRun(['ci', '--ignore-scripts']); await npmRun(['test']); await npmRun(['run', 'test:workflow']);
-    await npmRun(['run', 'build']); await run(process.execPath, ['scripts/package.mjs'], worktree);
-    await run(process.env.PYTHON || 'python', ['scripts/verify-package.py'], worktree);
-    await mkdir(path.join(ROOT, 'outputs'), { recursive: true });
+    await npmRun(['run', 'build']); await run(process.execPath, ['scripts/release.mjs', 'package'], worktree);
+    await verifyPackage(worktree);
+    await mkdir(BUILD, { recursive: true });
     for (const file of [`BiliSmooth-${spec.version}.zip`, 'SHA256SUMS.txt', `release-${spec.version}-files.json`, `release-notes-${spec.version}.md`])
-      await copyFile(path.join(worktree, 'outputs', file), path.join(ROOT, 'outputs', file));
+      await copyFile(path.join(worktree, 'local', 'build', file), path.join(BUILD, file));
   } catch (error) { fail(`${error.message}\nCommitted-source build retained at ${worktree}`); }
-  // This exact directory was created by this invocation beneath work/.
-  if (!worktree.startsWith(path.join(ROOT, 'work') + path.sep)) fail('Unexpected release worktree path.');
+  // This exact directory was created by this invocation beneath local/tmp/.
+  if (!worktree.startsWith(TMP + path.sep)) fail('Unexpected release worktree path.');
   await git(['worktree', 'remove', '--force', worktree]);
   if (await cleanMain() !== head) fail('HEAD changed during release validation; rerun publish for the intended commit.');
   const latest = await tagTargets(spec.tag);
@@ -161,13 +171,15 @@ async function main() {
     if (value === '--draft') options.draft = true;
     else if (value === '--tag') options.tag = args.shift();
     else if (value === '--timeout') options.timeout = Number(args.shift());
-    else fail(`Unknown argument ${value}. Use check|publish|verify [--tag vX.Y.Z] [--timeout seconds]; --draft is for CI verification.`);
+    else fail(`Unknown argument ${value}. Use check|package|verify-package|publish|verify [--tag vX.Y.Z] [--timeout seconds]; --draft is for CI verification.`);
   }
   if (options.timeout !== undefined && (!Number.isInteger(options.timeout) || options.timeout < 30 || options.timeout > 1800)) fail('--timeout must be 30–1800 seconds.');
+  if (command === 'package') { console.log(JSON.stringify(await packageExtension(ROOT))); return; }
+  if (command === 'verify-package') { await verifyPackage(); return; }
   const spec = await checkRelease(options);
   if (command === 'check') console.log(JSON.stringify(spec));
   else if (command === 'publish') { if (options.draft) fail('publish does not accept --draft.'); await publish(spec, options); }
   else if (command === 'verify') await verify(spec, options);
-  else fail('Use check, publish or verify.');
+  else fail('Use check, package, verify-package, publish or verify.');
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });
+if (isMain(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });

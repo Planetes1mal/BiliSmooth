@@ -1,2 +1,2 @@
 #!/bin/sh
-node scripts/check-commit-message.mjs --file "$1"
+node scripts/commit.mjs check --file "$1"
