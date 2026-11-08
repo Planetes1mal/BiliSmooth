@@ -95,3 +95,22 @@ export function qualityFit(goodputBps, qualities, rate) {
   const quality = qualities.find(covers) || null, current = qualities.find(row => row.current);
   return { quality, short: !quality || !!current && !covers(current) };
 }
+
+// Per-server measurements for the Servers page, keyed by host. A server that served playback keeps its playback
+// measurement; a server measured only by a speed test takes its newest completed video sample of the current network
+// epoch: the whole request, first byte included, over at most 768 KiB, so it is a rough reading.
+export function serverMeasurements(session, networkEpoch) {
+  const rows = new Map((Array.isArray(session?.hosts) ? session.hosts : []).filter(row => row?.host).map(row => [row.host, row]));
+  const tested = new Map();
+  for (const race of Array.isArray(session?.races) ? session.races : []) {
+    if (race?.track === 'audio' || !finite(race?.at) || finite(networkEpoch) && finite(race.networkEpoch) && race.networkEpoch !== networkEpoch) continue;
+    for (const sample of Array.isArray(race.samples) ? race.samples : []) {
+      if (!sample?.ok || !sample.host || rows.has(sample.host) || !finite(sample.bytes) || !finite(sample.elapsedMs) || sample.elapsedMs <= 0) continue;
+      if (tested.get(sample.host)?.measuredAt >= race.at) continue;
+      tested.set(sample.host, { host: sample.host, goodputBps: sample.bytes * 8000 / sample.elapsedMs,
+        ttfbMedianMs: finite(sample.firstByteMs) ? sample.firstByteMs : null, measuredAt: race.at });
+    }
+  }
+  for (const [host, row] of tested) rows.set(host, row);
+  return rows;
+}

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Delivery from '../../src/core/delivery-session.js';
-import { videoQualities, qualityFit, QUALITY_HEADROOM } from '../../src/ui/shared/playback.js';
+import { videoQualities, qualityFit, QUALITY_HEADROOM, serverMeasurements } from '../../src/ui/shared/playback.js';
 import { qualityName } from '../../src/ui/shared/format.js';
 
 const host = 'upos-sz-mirrorcosov.bilivideo.com';
@@ -54,4 +54,18 @@ test('quality names follow Bilibili quality numbers, then the height', () => {
   assert.equal(qualityName({ id: 999, height: 2160 }, 'en'), '4K');
   assert.equal(qualityName({ id: 999, height: 1440 }, 'en'), '1440P');
   assert.equal(qualityName({ id: 999, height: null }, 'en'), null);
+});
+
+test('a server measured only by a speed test shows its newest video sample of the current epoch', () => {
+  const sample = (host, bytes, elapsedMs, ok = true) => ({ host, ok, bytes, elapsedMs, firstByteMs: 100 });
+  const session = { hosts: [{ host: 'played', goodputBps: 9e6, ttfbMedianMs: 50, measuredAt: 1 }], races: [
+    { at: 10, networkEpoch: 1, track: 'video', samples: [sample('tested', 786432, 1000), sample('played', 786432, 100), sample('failed', 0, 500, false)] },
+    { at: 20, networkEpoch: 1, track: 'video', samples: [sample('tested', 786432, 500)] },
+    { at: 30, networkEpoch: 1, track: 'audio', samples: [sample('audio-only', 65536, 100)] },
+    { at: 40, networkEpoch: 0, track: 'video', samples: [sample('old-epoch', 786432, 100)] }] };
+  const rows = serverMeasurements(session, 1);
+  assert.equal(rows.get('played').goodputBps, 9e6, 'playback measurement wins');
+  assert.deepEqual(rows.get('tested'), { host: 'tested', goodputBps: 786432 * 8000 / 500, ttfbMedianMs: 100, measuredAt: 20 });
+  for (const host of ['failed', 'audio-only', 'old-epoch']) assert.equal(rows.has(host), false, host);
+  assert.equal(serverMeasurements(null, 1).size, 0);
 });

@@ -4,7 +4,7 @@
 import settings from '../../../core/settings.js';
 import * as format from '../../shared/format.js';
 import { icon } from '../../shared/icons.js';
-import { serverChoice, testResult, testBlocker, videoQualities, qualityFit } from '../../shared/playback.js';
+import { serverChoice, testResult, testBlocker, videoQualities, qualityFit, serverMeasurements } from '../../shared/playback.js';
 import { h, text, show } from '../dom.js';
 import { ceilingFor } from '../chart.js';
 import { T, segmented } from './parts.js';
@@ -108,7 +108,7 @@ export function createServers(section, app) {
     testButton.disabled = !connected || app.busy('retry') || !!blocker;
 
     // Measured servers first (fastest on top), then measured without a trusted speed, then untested in list order.
-    const measured = new Map((connected && Array.isArray(view.session?.hosts) ? view.session.hosts : []).map(row => [row.host, row]));
+    const measured = connected ? serverMeasurements(view.session, view.networkEpoch) : new Map();
     const speedOf = host => finite(measured.get(host)?.goodputBps) ? measured.get(host).goodputBps : null;
     const rank = host => speedOf(host) !== null ? 0 : measured.has(host) ? 1 : 2;
     const hosts = app.hosts().map((host, index) => ({ host, index })).sort((a, b) => rank(a.host) - rank(b.host) || (speedOf(b.host) || 0) - (speedOf(a.host) || 0) || a.index - b.index);
