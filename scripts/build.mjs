@@ -46,9 +46,6 @@ async function include(sourceFile, outputFile) {
 for (const file of ['content.js', 'background.js']) await include('src/extension/' + file, file);
 for (const locale of ['en', 'zh_CN'])
   await include(`src/extension/_locales/${locale}/messages.json`, `_locales/${locale}/messages.json`);
-const logoBytes = await readFile(inside('src/ui/icon.svg'));
-const logoPath = `icon.${hash(logoBytes).slice(0, 12)}.svg`;
-await include('src/ui/icon.svg', logoPath);
 await include('src/ui/motion-runtime.js', 'motion-runtime.js');
 const iconPaths = {};
 for (const size of [16, 32, 48, 128]) {
@@ -71,7 +68,6 @@ await include('src/ui/dashboard/tabler-LICENSE.txt', 'control/tabler-LICENSE.txt
 const html = outputs.get('control/index.html').toString()
   .replace(/<meta\s+name=["']bilismooth-version["'][^>]*>/gi, '')
   .replace(/<head>/i, `<head>\n<meta name="bilismooth-version" content="${pkg.version}">`)
-  .replaceAll('../icon.svg', '../' + logoPath)
   .replaceAll('../icons/32.png', '../' + iconPaths[32]);
 outputs.set('control/index.html', Buffer.from(html));
 for (const file of ['LICENSE', 'NOTICE.md', 'README.md', 'README.en.md', 'PRIVACY.md', 'PRIVACY.en.md', 'CHANGELOG.md',
