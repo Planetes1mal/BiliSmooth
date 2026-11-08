@@ -82,6 +82,14 @@ test('earlier accent and entry choices map to their new equivalent or reset; pla
   assert.equal(settings.normalize({ accent: 'violet', floatingEntryType: 'resolution' }).floatingEntryType, 'icon');
 });
 
+test('teal saved before schema 5 becomes blue once; teal chosen afterwards stays', async () => {
+  const h = extension({ [migration.key]: { ...settings.normalize({ lang: 'en' }), accent: 'teal', schemaVersion: 4 } });
+  assert.equal((await h.command('read')).result.accent, 'blue');
+  assert.deepEqual([h.store[migration.key].accent, h.store[migration.key].schemaVersion, h.store[migration.key].lang], ['blue', 5, 'en']);
+  await h.command('patch', { accent: 'teal' });
+  assert.equal((await h.command('read')).result.accent, 'teal'); assert.equal(h.store[migration.key].accent, 'teal');
+});
+
 test('saved Akamai fixed routes migrate to automatic selection and cannot be selected again', async () => {
   for (const [key, host] of [[migration.key, 'upos-hz-mirrorakam.akamaized.net'], ['prior.preferences', 'upos-sz-mirrorakam.akamaized.net']]) {
     const saved = { enabled: true, selection: 'fixed', pcdnHost: host, lang: 'en' };

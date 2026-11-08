@@ -11,7 +11,9 @@ export const floatingEntryTypes = Object.freeze(['icon', 'buffer', 'speed', 'com
 // Visual choices from earlier versions that still have a close equivalent; the rest fall back to the default.
 const legacyAccents = Object.freeze({ bili: 'blue', emerald: 'green', sunset: 'orange', peach: 'orange' });
 const legacyEntryTypes = Object.freeze({ 'status-logo': 'icon', logo: 'icon', status: 'icon' });
-export const defaults = Object.freeze({ schemaVersion: 4, enabled: true, selection: 'auto', mode: 'bad-only',
+// Schema 5 marks a record written after teal stopped being the default accent (see settings-migration.js).
+export const SCHEMA_VERSION = 5;
+export const defaults = Object.freeze({ schemaVersion: SCHEMA_VERSION, enabled: true, selection: 'auto', mode: 'bad-only',
   pcdnHost: candidatePool[0], candidatePool, mcdnStrategy: 'proxy-all', proxyHost: 'proxy-tf-all-ws.bilivideo.com',
   portHeuristic: true, stallRecovery: true, rewriteAkamai: false, p2pGuard: false,
   lang: 'zh', accent: 'blue', theme: 'system', floatingEntryType: 'icon', maxDepth: 20 });
@@ -40,7 +42,7 @@ export function patch(value) {
 }
 // A complete settings object: defaults plus the valid fields of the input.
 export function normalize(value) {
-  const result = { ...defaults, ...patch(value), schemaVersion: 4, candidatePool: [...candidatePool], maxDepth: 20 };
+  const result = { ...defaults, ...patch(value), schemaVersion: SCHEMA_VERSION, candidatePool: [...candidatePool], maxDepth: 20 };
   if (value?.selection === 'fixed' && /\.akamaized\.net$/.test(cleanHost(value.pcdnHost))) result.selection = 'auto';
   return result;
 }

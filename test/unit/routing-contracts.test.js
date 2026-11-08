@@ -15,7 +15,7 @@ const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve()
 test('settings v4 is the single default authority and cannot be replaced by an unvalidated route pool', () => {
   assert.deepEqual(Object.keys(policy).sort(), ['addressForHost', 'createPolicy']);
   const config = settings.normalize({ pcdnHost: 'attacker.test', candidatePool: ['attacker.test'], maxDepth: 9000 });
-  assert.equal(config.schemaVersion, 4);
+  assert.equal(config.schemaVersion, 5);
   assert.equal(config.pcdnHost, A);
   assert.deepEqual(config.candidatePool, settings.candidatePool);
   assert.equal(config.candidatePool.length, 9);
