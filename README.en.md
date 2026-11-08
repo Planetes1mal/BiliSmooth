@@ -59,6 +59,6 @@ See the [privacy policy](./PRIVACY.en.md) for data handling and permission detai
 
 ## Contributing and license
 
-Report problems or suggest improvements in [Issues](https://github.com/Planetes1mal/BiliSmooth/issues). For development, see the [contribution guide](./CONTRIBUTING.md).
+Report problems or suggest improvements in [Issues](https://github.com/Planetes1mal/BiliSmooth/issues).
 
 BiliSmooth is [MIT licensed](./LICENSE). Its routing and configuration code adapts [realzza/bilibili-accelerator](https://github.com/realzza/bilibili-accelerator). The interface uses Motion and Tabler Icons. See the [third-party notices](./NOTICE.md) for attribution.

@@ -1,12 +1,13 @@
-# Dependencies, generated extension, and local verification evidence
+# Local working files, agent instructions and skills
+/local/
+/AGENTS.md
+/.claude/
+
+# Dependencies, generated extension and script output
 /node_modules/
 /dist/
 /outputs/
 /work/
-/archive/
-/docs/research/
-/docs/validation/evidence/
-/docs/validation/[0-9]*.md
 
 # Local credentials and environment overrides
 .env

@@ -59,6 +59,6 @@ https://github.com/user-attachments/assets/3dcc0014-67a0-4f25-b047-b789cf7c62b3
 
 ## 贡献与许可
 
-欢迎通过 [Issues](https://github.com/Planetes1mal/BiliSmooth/issues) 报告问题或提出建议。参与开发请阅读 [贡献指南](./CONTRIBUTING.md)。
+欢迎通过 [Issues](https://github.com/Planetes1mal/BiliSmooth/issues) 报告问题或提出建议。
 
 本项目以 [MIT 许可证](./LICENSE) 开源。线路处理与配置部分基于 [realzza/bilibili-accelerator](https://github.com/realzza/bilibili-accelerator) 改造，界面使用 Motion 和 Tabler Icons。完整归属见 [第三方声明](./NOTICE.md)。
