@@ -30,7 +30,7 @@ This command does not upload or publish anything.`);
  const marqueeOnly=args.includes('--marquee-only');
  const logo=await fs.readFile(path.join(root,'src/ui/icon.svg'),'utf8');
  await fs.mkdir(out,{recursive:true});
- const browser=await chromium.launch({headless:true});try{
+ const browser=await chromium.launch({headless:true,args:['--mute-audio']});try{
   if(!marqueeOnly){await makeIcons(browser);await fs.copyFile(path.join(root,'src/extension/icons/128.png'),path.join(out,'icon-128.png'));}
   const page=await browser.newPage({viewport:{width:440,height:280},deviceScaleFactor:1});
   if(!marqueeOnly){
